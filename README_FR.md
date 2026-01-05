@@ -4,6 +4,8 @@ ReView est une plateforme de collaboration vidéo open-source, sécurisée et au
 
 Le projet met l'accent sur la confidentialité des données (vos fichiers restent chez vous) et la simplicité d'utilisation.
 
+<img width="1266" height="459" alt="image" src="https://github.com/user-attachments/assets/e3da519d-5d61-4586-8062-e7cf6e1730a3" />
+
 ## Fonctionnalités Principales
 
 ### 🎥 Collaboration & Visionnage
