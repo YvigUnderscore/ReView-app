@@ -28,85 +28,18 @@ Le projet met l'accent sur la confidentialité des données (vos fichiers resten
 - **Permissions** : Gestion fine des droits (Propriétaire, Membre, Admin).
 - **Revue Client** : Liens de partage sécurisés pour les clients externes sans compte.
 
-## Installation et Démarrage
-
-### Prérequis
-- Docker et Docker Compose installés sur votre machine.
-
-### Lancement Rapide
-
-1. **Cloner le dépôt :**
-   ```bash
-   git clone <votre-repo-url>
-   cd ReView
-   ```
-
-2. **Démarrer l'application :**
-   ```bash
-   docker-compose up -d --build
-   ```
-
-3. **Accéder à l'interface :**
-   Ouvrez votre navigateur sur `http://localhost:3429`.
-
-### Configuration
-- **Premier compte :** Le premier utilisateur inscrit devient automatiquement **Administrateur**.
-- **Invitations :** L'inscription se fait uniquement via invitation générée par un admin.
-- **Stockage :** Les données sont stockées localement (volume Docker ou dossier configuré).
-
-### Configuration SMTP
-
-Vous pouvez configurer votre serveur mail pour l'envoi d'invitations et de notifications dans l'Admin Dashboard.
-
-L'application propose des préréglages pour les fournisseurs courants :
-- **OVH** : Sélectionner "OVH" remplira automatiquement les champs (Hôte: `ssl0.ovh.net`, Port: `465`, Sécurité: `SSL/TLS`).
-- **Gmail** et **Outlook** sont également disponibles.
-- Vous pouvez toujours entrer une configuration **Personnalisée**.
-
-### Import 3D
-Pour importer un modèle 3D avec des textures séparées :
-1. Créez un fichier ZIP contenant :
-   - Votre fichier `.glb`.
-   - Vos textures (dans le même dossier ou des sous-dossiers, tant que les liens relatifs dans le GLB sont corrects).
-2. Sélectionnez l'option "3D Asset" lors de la création du projet ou de l'upload d'une version.
-3. Chargez le fichier ZIP.
+Reviews Vidéos:
+<img width="1946" height="1217" alt="image" src="https://github.com/user-attachments/assets/cbb89445-f282-4c09-ae4f-71e29ffb648d" />
+Reviews d'Images:
+<img width="1635" height="640" alt="image" src="https://github.com/user-attachments/assets/f4face06-62ec-4081-9e59-1f8d6e3f9aba" />
+Reviews d'Assets 3D:
+<img width="1646" height="656" alt="image" src="https://github.com/user-attachments/assets/777c31ff-4977-49f7-86b8-9805d12040ae" />
 
 ---
 
-## Mises à Jour (Version Actuelle)
-
-Les fonctionnalités suivantes viennent d'être ajoutées :
-
-- ✅ **Dashboard Unifié** : Vues Grille et Liste commutables.
-- ✅ **Filtres Avancés** : Barre d'outils unifiée avec recherche, filtres (Statut, Date) et tri.
-- ✅ **Support Image / Storyboard** : Upload et review de séquences d'images (JPG, PNG, WEBP).
-- ✅ **Comparaison Split Screen** : Vues synchronisées pour comparer les versions.
-- ✅ **Commentaires sur la durée** : Sélection de plage sur la timeline.
-- ✅ **Export PDF/CSV** : Rapports détaillés pour la production.
-- ✅ **Outils de Dessin** : Ajout des courbes, bulles et réglage d'épaisseur.
-- ✅ **Tâches** : Assignation directe et suivi de résolution.
-- ✅ **Toast Notifications** : Feedback visuel non intrusif pour les succès et erreurs.
-- ✅ **Micro-interactions** : Animations fluides sur les cartes de projet (Play button, Scale, Shadow).
-- ✅ **Upload Progress** : Barre de progression précise avec estimation du temps restant.
-- ✅ **UI Modernisée** : Effets de flou (backdrop-blur) sur les modales.
-- ✅ **Validation Inline** : Validation des formulaires en temps réel avec icône de visibilité du mot de passe.
-- ✅ **Expérience Mobile** : Navigation par "Barre d'onglets" inférieure sur mobile portrait et zones de toucher agrandies.
-- ✅ **Avatar Stack** : Visualisation rapide des membres de l'équipe sur les cartes de projet.
-- ✅ **Notifications Groupées** : Organisation par projet dans le centre de notifications.
-
 ## Roadmap
+<img width="932" height="569" alt="image" src="https://github.com/user-attachments/assets/45089326-b597-4f5e-acdb-dfb41a3ac026" />
 
-Fonctionnalités futures envisagées :
-
-1. **Authentification SSO** : Connexion via Google, GitHub, Discord...
-2. **Double authentification (2FA)** : Sécurisation accrue.
-3. **Quotas de stockage** : Gestion de l'espace disque.
-4. **Raccourcis clavier personnalisables**.
-5. **Intégrations Webhooks** (Slack/Discord/Teams).
-6. **Transcodage adaptatif (HLS)** : Streaming optimisé.
-7. **Dossiers et sous-dossiers** : Organisation avancée.
-8. **Palette de Commandes (Cmd+K)** : Navigation rapide.
-9. **Intégrations DCC** : Plugins pour Blender, Maya, Unreal Engine.
 
 ---
 *ReView - Créez, Partagez, Validez.*
