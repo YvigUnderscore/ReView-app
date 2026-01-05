@@ -6,6 +6,9 @@ ReView is an open-source, secure, and self-hostable video collaboration platform
 
 The project emphasizes data privacy (your files stay with you) and ease of use.
 
+<img width="1266" height="459" alt="image" src="https://github.com/user-attachments/assets/e3da519d-5d61-4586-8062-e7cf6e1730a3" />
+
+
 ## Key Features
 
 ### 🎥 Collaboration & Viewing
@@ -30,46 +33,19 @@ The project emphasizes data privacy (your files stay with you) and ease of use.
 - **Permissions**: Fine-grained access control (Owner, Member, Admin).
 - **Client Review**: Secure sharing links for external clients without requiring an account.
 
+Video reviews:
+<img width="1946" height="1217" alt="image" src="https://github.com/user-attachments/assets/cbb89445-f282-4c09-ae4f-71e29ffb648d" />
+Image reviews:
+<img width="1635" height="640" alt="image" src="https://github.com/user-attachments/assets/f4face06-62ec-4081-9e59-1f8d6e3f9aba" />
+3D Assets reviews:
+<img width="1646" height="656" alt="image" src="https://github.com/user-attachments/assets/777c31ff-4977-49f7-86b8-9805d12040ae" />
+
+
 ## Installation and Startup
 
 Please refer to the [Installation Guide](./installation.md) for detailed instructions.
 
 ---
-
-## Recent Updates (Current Version)
-
-The following features have just been added:
-
-- ✅ **Unified Dashboard**: Switchable Grid and List views.
-- ✅ **Advanced Filters**: Unified toolbar with search, filters (Status, Date), and sorting.
-- ✅ **Image / Storyboard Support**: Upload and review image sequences (JPG, PNG, WEBP).
-- ✅ **Split Screen Comparison**: Synchronized views to compare versions.
-- ✅ **Duration Comments**: Range selection on the timeline.
-- ✅ **PDF/CSV Export**: Detailed reports for production.
-- ✅ **Drawing Tools**: Added curves, bubbles, and thickness adjustment.
-- ✅ **Tasks**: Direct assignment and resolution tracking.
-- ✅ **Toast Notifications**: Non-intrusive visual feedback for successes and errors.
-- ✅ **Micro-interactions**: Smooth animations on project cards (Play button, Scale, Shadow).
-- ✅ **Upload Progress**: Precise progress bar with remaining time estimation.
-- ✅ **Modernized UI**: Blur effects (backdrop-blur) on modals.
-- ✅ **Inline Validation**: Real-time form validation with password visibility icon.
-- ✅ **Mobile Experience**: Bottom "Tab Bar" navigation on portrait mobile and enlarged touch zones.
-- ✅ **Avatar Stack**: Quick visualization of team members on project cards.
-- ✅ **Grouped Notifications**: Organized by project in the notification center.
-
-## Roadmap
-
-Future planned features:
-
-1. **SSO Authentication**: Login via Google, GitHub, Discord...
-2. **Two-Factor Authentication (2FA)**: Enhanced security.
-3. **Storage Quotas**: Disk space management.
-4. **Customizable Keyboard Shortcuts**.
-5. **Webhook Integrations** (Slack/Discord/Teams).
-6. **Adaptive Transcoding (HLS)**: Optimized streaming.
-7. **Folders and Subfolders**: Advanced organization.
-8. **Command Palette (Cmd+K)**: Quick navigation.
-9. **DCC Integrations**: Plugins for Blender, Maya, Unreal Engine.
-
+<img width="932" height="569" alt="image" src="https://github.com/user-attachments/assets/45089326-b597-4f5e-acdb-dfb41a3ac026" />
 ---
 *ReView - Create, Share, Validate.*
