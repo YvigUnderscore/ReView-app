@@ -1,0 +1,23 @@
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "3429:80"
+    depends_on:
+      - backend
+    restart: always
+
+  backend:
+    build: ./backend
+    ports:
+      - "3430:3000" # Optional: Expose for debugging, though frontend proxies to internal 3000
+    environment:
+      - PORT=3000
+      - DATA_PATH=/app/data
+      - DATABASE_URL=file:/app/data/review.db
+      - JWT_SECRET=${JWT_SECRET}
+    volumes:
+      # Map host data path to container data path
+      # The ${DATA_PATH:-/root/ReView/} syntax defaults to /root/ReView/ if DATA_PATH is not set in .env
+      - ${DATA_PATH:-/root/ReView/}:/app/data
+    restart: always

@@ -1,0 +1,73 @@
+const express = require('express');
+const crypto = require('crypto');
+const { PrismaClient } = require('@prisma/client');
+const { authenticateToken, requireAdmin } = require('./middleware');
+const { rateLimit } = require('./utils/rateLimiter');
+
+const router = express.Router();
+const prisma = new PrismaClient();
+
+// Rate limit: 20 invites per minute per IP (Admin protection)
+const inviteLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 20,
+    message: { error: 'Too many invites created, please try again later.' }
+});
+
+// POST /invites: Create new invite (Admin only)
+router.post('/', authenticateToken, requireAdmin, inviteLimiter, async (req, res) => {
+  const { email, role } = req.body;
+
+  try {
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+    const invite = await prisma.invite.create({
+      data: {
+        token,
+        email,
+        role: role || 'user',
+        expiresAt
+      }
+    });
+
+    res.json(invite);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to create invite' });
+  }
+});
+
+// Rate limit: 60 validation attempts per minute (Anti-enumeration)
+const validateLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    message: { error: 'Too many validation attempts.' }
+});
+
+// GET /invites/:token: Validate invite
+router.get('/:token', validateLimiter, async (req, res) => {
+  const { token } = req.params;
+
+  try {
+    const invite = await prisma.invite.findUnique({ where: { token } });
+
+    if (!invite) {
+      return res.status(404).json({ error: 'Invalid invite' });
+    }
+
+    if (invite.used) {
+      return res.status(400).json({ error: 'Invite already used' });
+    }
+
+    if (invite.expiresAt && new Date() > invite.expiresAt) {
+      return res.status(400).json({ error: 'Invite expired' });
+    }
+
+    res.json({ email: invite.email, role: invite.role });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to validate invite' });
+  }
+});
+
+module.exports = router;

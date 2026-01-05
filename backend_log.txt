@@ -1,0 +1,2 @@
+WARNING: JWT_SECRET not defined. Using insecure default for development.
+Server running on port 3000

@@ -1,0 +1,15 @@
+
+> frontend@0.0.0 preview
+> vite preview
+
+Port 4173 is in use, trying another one...
+  ➜  Local:   http://localhost:4174/
+  ➜  Network: use --host to expose
+7:59:28 PM [vite] http proxy error: /api/system/config
+AggregateError [ECONNREFUSED]:
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+7:59:28 PM [vite] http proxy error: /api/auth/status
+AggregateError [ECONNREFUSED]:
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)

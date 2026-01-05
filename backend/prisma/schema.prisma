@@ -1,0 +1,211 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int       @id @default(autoincrement())
+  email     String    @unique
+  password  String
+  name      String?
+  role      String    @default("user") // "admin" or "user"
+  avatarPath String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  comments  Comment[]
+  assignedComments Comment[] @relation("AssignedComments")
+
+  teams     Team[]    @relation("TeamMembers")
+
+  ownedTeams Team[]   @relation("TeamOwner")
+
+  teamRoles TeamRole[] @relation("UserRoles")
+  notifications Notification[]
+  notificationPreferences NotificationPreference[]
+  reactions Reaction[]
+}
+
+model NotificationPreference {
+  id        Int     @id @default(autoincrement())
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+  type      String  // MENTION, REPLY, PROJECT, VIDEO, STATUS, TEAM_ADD
+  email     Boolean @default(true)
+  inApp     Boolean @default(true)
+
+  @@unique([userId, type])
+}
+
+model TeamRole {
+  id        Int      @id @default(autoincrement())
+  name      String
+  color     String   @default("#3b82f6") // Default blue
+  team      Team     @relation(fields: [teamId], references: [id])
+  teamId    Int
+  users     User[]   @relation("UserRoles")
+}
+
+model Notification {
+  id          Int      @id @default(autoincrement())
+  content     String
+  type        String   @default("SYSTEM") // MENTION, SYSTEM, REPLY
+  referenceId Int?     // e.g., Comment ID or Video ID
+  projectId   Int?
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  videoId     Int?
+  isRead      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      Int
+}
+
+model Team {
+  id        Int       @id @default(autoincrement())
+  name      String
+
+  owner     User      @relation("TeamOwner", fields: [ownerId], references: [id])
+  ownerId   Int
+
+  members   User[]    @relation("TeamMembers")
+  projects  Project[]
+  roles     TeamRole[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Invite {
+  id        Int       @id @default(autoincrement())
+  token     String    @unique
+  email     String?
+  role      String    @default("user")
+  used      Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  expiresAt DateTime?
+}
+
+model Project {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  thumbnailPath String?
+  hasCustomThumbnail Boolean @default(false)
+  status      String   @default("INTERNAL_REVIEW") // INTERNAL_REVIEW, CLIENT_REVIEW, ALL_REVIEWS_DONE
+  clientToken String?  @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  videos      Video[]
+  imageBundles ImageBundle[]
+  threeDAssets ThreeDAsset[]
+
+  team        Team?    @relation(fields: [teamId], references: [id])
+  teamId      Int?
+
+  notifications Notification[]
+}
+
+model Video {
+  id           Int       @id @default(autoincrement())
+  project      Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId    Int
+  filename     String    // System filename
+  originalName String    // User's filename
+  versionName  String    @default("V01")
+  mimeType     String
+  path         String
+  frameRate    Float     @default(24.0)
+  createdAt    DateTime  @default(now())
+  comments     Comment[]
+}
+
+model ThreeDAsset {
+  id           Int       @id @default(autoincrement())
+  project      Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId    Int
+  filename     String    // System filename
+  originalName String    // User's filename
+  versionName  String    @default("V01")
+  mimeType     String
+  path         String
+  createdAt    DateTime  @default(now())
+  comments     Comment[]
+}
+
+model ImageBundle {
+  id          Int      @id @default(autoincrement())
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId   Int
+  versionName String   @default("V01")
+  createdAt   DateTime @default(now())
+  images      Image[]
+}
+
+model Image {
+  id           Int         @id @default(autoincrement())
+  bundle       ImageBundle @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  bundleId     Int
+  filename     String
+  originalName String
+  path         String
+  mimeType     String
+  order        Int
+  comments     Comment[]
+}
+
+model Comment {
+  id         Int      @id @default(autoincrement())
+  video      Video?   @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  videoId    Int?
+  image      Image?   @relation(fields: [imageId], references: [id], onDelete: Cascade)
+  imageId    Int?
+  threeDAsset ThreeDAsset? @relation(fields: [threeDAssetId], references: [id], onDelete: Cascade)
+  threeDAssetId Int?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId     Int?
+  guestName  String?
+  content    String
+  timestamp  Float    // Timestamp in seconds (video time)
+  duration   Float?   // Duration of the comment range (if any)
+  annotation String?  // JSON string for visual annotations
+  cameraState String?  // JSON string for 3D camera state (position, target, etc.)
+  screenshotPath String? // Path to the screenshot file
+  isResolved Boolean  @default(false)
+  isVisibleToClient Boolean @default(false)
+  createdAt  DateTime @default(now())
+
+  parentId   Int?
+  parent     Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies    Comment[] @relation("CommentReplies")
+
+  assigneeId Int?
+  assignee   User?     @relation("AssignedComments", fields: [assigneeId], references: [id], onDelete: SetNull)
+
+  reactions  Reaction[]
+}
+
+model Reaction {
+  id        Int      @id @default(autoincrement())
+  emoji     String
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int?
+  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  commentId Int
+  guestName String?
+  createdAt DateTime @default(now())
+
+  @@unique([commentId, userId, emoji])
+}
+
+model SystemSetting {
+  key   String @id
+  value String
+}
