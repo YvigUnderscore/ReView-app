@@ -1,8 +1,11 @@
 # ReView
 
-ReView est une plateforme de collaboration vidéo open-source, sécurisée et auto-hébergeable. Conçue comme une alternative gratuite et accessible à des outils comme Frame.io ou SyncSketch, elle permet aux créateurs, studios et équipes de réviser leurs projets vidéo avec précision et efficacité.
+ReView est une plateforme de collaboration vidéo open-source, sécurisée et auto-hébergeable. Conçue comme une alternative gratuite et accessible à des outils déjà bien connus, elle permet aux créateurs, studios et équipes de réviser leurs projets vidéo avec précision et efficacité.
 
 Le projet met l'accent sur la confidentialité des données (vos fichiers restent chez vous) et la simplicité d'utilisation.
+
+# Regardez le trailer:
+[![ReView Trailer](https://img.youtube.com/vi/Cy78-i_kDJY/0.jpg)](https://www.youtube.com/watch?v=Cy78-i_kDJY)
 
 <img width="1266" height="459" alt="image" src="https://github.com/user-attachments/assets/e3da519d-5d61-4586-8062-e7cf6e1730a3" />
 
