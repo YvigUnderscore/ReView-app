@@ -42,6 +42,24 @@ Reviews d'Assets 3D:
 
 ---
 
+## Dépendances Open Source
+
+ReView s'appuie sur le travail formidable de la communauté open source. Nous remercions les projets suivants :
+
+*   **Node.js** - Licence MIT
+*   **Express** - Licence MIT
+*   **Prisma** - Licence Apache 2.0
+*   **Socket.IO** - Licence MIT
+*   **React** - Licence MIT
+*   **Vite** - Licence MIT
+*   **Tailwind CSS** - Licence MIT
+*   **Three.js** - Licence MIT
+*   **FFmpeg** - LGPL v2.1+
+*   **PDFKit** - Licence MIT
+*   **Lucide** - Licence ISC
+*   **Framer Motion** - Licence MIT
+
+---
 ## Roadmap
 <img width="932" height="569" alt="image" src="https://github.com/user-attachments/assets/45089326-b597-4f5e-acdb-dfb41a3ac026" />
 
