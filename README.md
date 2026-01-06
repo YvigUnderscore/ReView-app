@@ -46,6 +46,23 @@ Image reviews:
 
 Please refer to the [Installation Guide](./installation.md) for detailed instructions.
 
+## Open Source Dependencies
+
+ReView is built on the shoulders of giants. We gratefully acknowledge the following open-source projects:
+
+*   **Node.js** - MIT License
+*   **Express** - MIT License
+*   **Prisma** - Apache 2.0 License
+*   **Socket.IO** - MIT License
+*   **React** - MIT License
+*   **Vite** - MIT License
+*   **Tailwind CSS** - MIT License
+*   **Three.js** - MIT License
+*   **FFmpeg** - LGPL v2.1+
+*   **PDFKit** - MIT License
+*   **Lucide** - ISC License
+*   **Framer Motion** - MIT License
+
 ---
 <img width="932" height="569" alt="image" src="https://github.com/user-attachments/assets/45089326-b597-4f5e-acdb-dfb41a3ac026" />
 ---
