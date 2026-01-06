@@ -12,8 +12,8 @@ The application requires the following environment variables to be set (e.g., in
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/YvigUnderscore/ReView.git
-   cd ReView
+   git clone https://github.com/YvigUnderscore/ReView-app.git
+   cd ReView-app
    ```
 
 2. **Start the application:**
