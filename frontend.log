@@ -1,9 +1,0 @@
-
-> frontend@0.0.0 dev
-> vite --port 3429
-
-
-  VITE v7.3.0  ready in 277 ms
-
-  ➜  Local:   http://localhost:3429/
-  ➜  Network: use --host to expose
