@@ -6,7 +6,7 @@ ReView is an open-source, secure, and self-hostable video collaboration platform
 The project emphasizes data privacy (your files stay with you) and ease of use.
 
 # Watch the trailer:
-[![ReView Trailer](https://img.youtube.com/vi/Cy78-i_kDJY/0.jpg)](https://www.youtube.com/watch?v=Cy78-i_kDJY)
+👉 https://www.youtube.com/watch?v=Cy78-i_kDJY
 
 <img width="1266" height="459" alt="image" src="https://github.com/user-attachments/assets/e3da519d-5d61-4586-8062-e7cf6e1730a3" />
 
