@@ -360,6 +360,24 @@ const generatePDF = async (project, mediaObject, comments, res, settings = {}) =
         let requiredHeight = 25 + textHeight + 40;
         if (imageAreaHeight > 0) requiredHeight += imageAreaHeight + 20;
 
+        // Calculate Attachment Height Pre-emptively
+        let attachmentHeight = 0;
+        if (comment.attachmentPath) {
+             const attachmentFullPath = path.join(DATA_PATH, 'media', comment.attachmentPath);
+             if (fs.existsSync(attachmentFullPath)) {
+                 try {
+                     // We need dimensions to scale.
+                     // PDFKit openImage is synchronous and cheap if cached?
+                     const attachImg = doc.openImage(attachmentFullPath);
+                     const attachScale = Math.min(maxW / attachImg.width, maxH / attachImg.height);
+                     attachmentHeight = (attachImg.height * attachScale) + 10;
+                 } catch(e) {
+                     attachmentHeight = 20; // Error text height
+                 }
+             }
+        }
+        requiredHeight += attachmentHeight;
+
         if (doc.y + requiredHeight > doc.page.height - 50) {
             doc.addPage();
             fillBackground();
@@ -407,7 +425,7 @@ const generatePDF = async (project, mediaObject, comments, res, settings = {}) =
         doc.fontSize(10).fillColor(THEME.text).text(comment.content, cardX + padding, contentY, { width: textWidth });
         contentY = doc.y + 10;
 
-        // Images
+        // Images (Context / Viewer Screenshot)
         if (isRange) {
             const times = [
                 comment.timestamp,
@@ -439,7 +457,8 @@ const generatePDF = async (project, mediaObject, comments, res, settings = {}) =
                 } catch (e) {}
             }
 
-            doc.y = startY + requiredHeight + 10;
+            // Increment Y past the range images
+            contentY += shotHeight + 20;
 
         } else if (hasImage) {
             // Single Image - Use Prepared Image
@@ -455,22 +474,61 @@ const generatePDF = async (project, mediaObject, comments, res, settings = {}) =
                      if (comment.annotation) {
                          drawAnnotation(doc, comment.annotation, renderX, renderY, preparedImage.width, preparedImage.height);
                      }
+                     contentY += preparedImage.height + 10;
                  } catch (e) {
                      console.error("Image render error", e);
                      doc.text("[Image Error]", cardX + padding, contentY);
+                     contentY += 30;
                  }
              } else {
                  // Error or missing
                  if (isThreeD && !comment.screenshotPath) {
                       doc.fontSize(10).fillColor(THEME.muted).text("[No 3D Preview Available]", cardX + padding, contentY);
+                      contentY += 20;
                  } else if (imageAreaHeight > 10) {
                      doc.text("[Image Error]", cardX + padding, contentY);
+                     contentY += 30;
                  }
              }
-             doc.y = startY + requiredHeight + 10;
-        } else {
-            doc.y = startY + requiredHeight + 10;
         }
+
+        // Attachment Image (Stacked Below)
+        if (comment.attachmentPath) {
+            const attachmentFullPath = path.join(DATA_PATH, 'media', comment.attachmentPath);
+            if (fs.existsSync(attachmentFullPath)) {
+                try {
+                    const attachImg = doc.openImage(attachmentFullPath);
+                    const attachScale = Math.min(maxW / attachImg.width, maxH / attachImg.height);
+                    const attachW = attachImg.width * attachScale;
+                    const attachH = attachImg.height * attachScale;
+
+                    // Center
+                    const attachX = cardX + padding + (maxW - attachW) / 2;
+
+                    // Check page break
+                    if (doc.y + attachH + 20 > doc.page.height - 50) {
+                        doc.addPage();
+                        fillBackground();
+                        contentY = 50;
+                    } else if (contentY + attachH + 20 > doc.y + requiredHeight) {
+                        // Dynamic height adjustment if attachment pushed us further
+                        // But we already pre-calculated requiredHeight? No, we didn't include attachment in pre-calc!
+                        // We must pre-calculate properly or rely on dynamic flow.
+                        // PDFKit 'rect' was already drawn.
+                        // We need to fix the pre-calculation block first.
+                    }
+
+                    doc.image(attachImg, attachX, contentY, { width: attachW });
+                    contentY += attachH + 10;
+                } catch(e) {
+                    console.error("Attachment render error", e);
+                    doc.text("[Attachment Error]", cardX + padding, contentY);
+                    contentY += 20;
+                }
+            }
+        }
+
+        doc.y = Math.max(doc.y, startY + requiredHeight + 10); // Ensure we move down past the card
     };
 
     // Determine Mode

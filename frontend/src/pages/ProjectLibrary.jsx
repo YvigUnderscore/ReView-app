@@ -4,6 +4,8 @@ import { Folder, ChevronRight, Plus, ArrowLeft } from 'lucide-react';
 import { useHeader } from '../context/HeaderContext';
 import { useBranding } from '../context/BrandingContext';
 import { useAuth } from '../context/AuthContext';
+import { useNotification } from '../context/NotificationContext'; // Use Notification Socket
+import ConfirmDialog from '../components/ConfirmDialog';
 import CreateProjectModal from '../components/CreateProjectModal';
 import EditProjectModal from '../components/EditProjectModal';
 import ProjectListToolbar from '../components/ProjectListToolbar';
@@ -25,9 +27,13 @@ const ProjectLibrary = () => {
     const [createModalFile, setCreateModalFile] = useState(null);
     const [editingProject, setEditingProject] = useState(null);
 
+    // Socket Integration
+    const { socket } = useNotification(); // Assuming NotificationContext exposes its socket instance
+
     // View State
     const [isDragging, setIsDragging] = useState(false);
     const [viewMode, setViewMode] = useState(localStorage.getItem('dashboard_view_mode') || 'grid');
+    const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, title: '', message: '', onConfirm: () => {}, isDestructive: false });
 
     // Toolbar State
     const [search, setSearch] = useState('');
@@ -99,6 +105,35 @@ const ProjectLibrary = () => {
         }
     }, [activeTeamId]);
 
+    // Real-time Listeners
+    useEffect(() => {
+        if (!socket) return;
+
+        const handleProjectCreate = (newProject) => {
+            if (activeTeamId && newProject.teamId === parseInt(activeTeamId)) {
+                setProjects(prev => [newProject, ...prev]);
+            }
+        };
+
+        const handleProjectUpdate = (updatedProject) => {
+             setProjects(prev => prev.map(p => p.id === updatedProject.id ? updatedProject : p));
+        };
+
+        const handleProjectDelete = ({ id }) => {
+             setProjects(prev => prev.filter(p => p.id !== parseInt(id)));
+        };
+
+        socket.on('PROJECT_CREATE', handleProjectCreate);
+        socket.on('PROJECT_UPDATE', handleProjectUpdate);
+        socket.on('PROJECT_DELETE', handleProjectDelete);
+
+        return () => {
+            socket.off('PROJECT_CREATE', handleProjectCreate);
+            socket.off('PROJECT_UPDATE', handleProjectUpdate);
+            socket.off('PROJECT_DELETE', handleProjectDelete);
+        };
+    }, [socket, activeTeamId]);
+
     const handleTeamClick = (teamId) => {
         setSearchParams({ teamId });
     };
@@ -129,19 +164,26 @@ const ProjectLibrary = () => {
     };
 
     const handleDelete = async (project) => {
-        if (window.confirm(`Are you sure you want to delete "${project.name}"?`)) {
-            try {
-                const res = await fetch(`/api/projects/${project.id}`, {
-                    method: 'DELETE',
-                    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-                });
-                if (res.ok) {
-                    setProjects(projects.filter(p => p.id !== project.id));
+        setConfirmDialog({
+            isOpen: true,
+            title: "Delete Project",
+            message: `Are you sure you want to delete "${project.name}"?`,
+            isDestructive: true,
+            onConfirm: async () => {
+                setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+                try {
+                    const res = await fetch(`/api/projects/${project.id}`, {
+                        method: 'DELETE',
+                        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                    });
+                    if (res.ok) {
+                        setProjects(projects.filter(p => p.id !== project.id));
+                    }
+                } catch (err) {
+                    console.error(err);
                 }
-            } catch (err) {
-                console.error(err);
             }
-        }
+        });
     };
 
     const handleStatusUpdate = async (project, status) => {
@@ -264,6 +306,15 @@ const ProjectLibrary = () => {
                         ))}
                     </div>
                 )}
+
+                <ConfirmDialog
+                    isOpen={confirmDialog.isOpen}
+                    title={confirmDialog.title}
+                    message={confirmDialog.message}
+                    onConfirm={confirmDialog.onConfirm}
+                    onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+                    isDestructive={confirmDialog.isDestructive}
+                />
 
                 {showCreateModal && (
                     <CreateProjectModal

@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, UserPlus, Shield, X, Check } from 'lucide-react';
+import { Plus, UserPlus, Shield, X, Check, Search, Copy, CheckCircle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import ConfirmDialog from '../../components/ConfirmDialog';
+import { toast } from 'sonner';
 
 const TeamDashboard = () => {
   const { activeTeam, switchTeam, checkStatus } = useAuth();
@@ -16,11 +18,20 @@ const TeamDashboard = () => {
   const [newRoleColor, setNewRoleColor] = useState('#3b82f6');
   const [activeMemberMenuId, setActiveMemberMenuId] = useState(null); // Member ID for whom the role menu is open
 
+  // Confirmation Dialog
+  const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, title: '', message: '', onConfirm: () => {}, isDestructive: false });
 
   // Forms
   const [newTeamName, setNewTeamName] = useState('');
-  const [inviteEmail, setInviteEmail] = useState('');
+
+  // Invite / Add Member State
+  const [inviteEmail, setInviteEmail] = useState(''); // Used for invite link generation if search fails
   const [inviteRole, setInviteRole] = useState('Member');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [generatedInviteLink, setGeneratedInviteLink] = useState(null);
+  const [copied, setCopied] = useState(false);
 
   const fetchTeams = useCallback(() => {
     fetch('/api/teams', {
@@ -42,36 +53,23 @@ const TeamDashboard = () => {
         }
         setTeams(teamsArray);
         setLoading(false);
-
-        // Ensure activeTeam is fresh from the list if possible
-        if (activeTeam) {
-            // No action needed, context handles selection, but we might want to refresh its data (members)
-            // Ideally AuthContext should update user on major changes, but here we just list them.
-        }
     })
     .catch((err) => {
         console.error("Failed to fetch teams:", err);
         setLoading(false);
         setTeams([]);
     });
-  }, [activeTeam]); // Re-fetch if activeTeam changes? Not strictly needed but safe
+  }, []);
 
   const fetchRoles = useCallback((teamId) => {
      if (!teamId) return;
      fetch(`/api/teams/${teamId}/roles`, {
          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
      })
-     .then(res => {
-         if (!res.ok) throw new Error(res.statusText);
-         return res.json();
-     })
+     .then(res => res.json())
      .then(data => {
-         if (Array.isArray(data)) {
-            setTeamRoles(data);
-         } else {
-             setTeamRoles([]);
-             console.warn("Expected array for roles, got:", data);
-         }
+         if (Array.isArray(data)) setTeamRoles(data);
+         else setTeamRoles([]);
      })
      .catch(err => {
          console.error("Failed to fetch roles", err);
@@ -89,6 +87,30 @@ const TeamDashboard = () => {
     }
   }, [activeTeam, fetchRoles]);
 
+  // Search Logic
+  useEffect(() => {
+      if (searchQuery.length < 2) {
+          setSearchResults([]);
+          return;
+      }
+      setIsSearching(true);
+      const timer = setTimeout(() => {
+          fetch(`/api/users/search?q=${encodeURIComponent(searchQuery)}`, {
+              headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+          })
+          .then(res => res.json())
+          .then(data => {
+              // Filter out existing members
+              const currentMemberIds = teams.find(t => t.id === activeTeam.id)?.members?.map(m => m.id) || [];
+              const filtered = data.filter(u => !currentMemberIds.includes(u.id));
+              setSearchResults(filtered);
+          })
+          .catch(console.error)
+          .finally(() => setIsSearching(false));
+      }, 300);
+      return () => clearTimeout(timer);
+  }, [searchQuery, activeTeam, teams]);
+
   const createTeam = async (e) => {
     e.preventDefault();
     try {
@@ -104,19 +126,15 @@ const TeamDashboard = () => {
             const newTeam = await res.json();
             setNewTeamName('');
             setShowCreateModal(false);
-            await checkStatus(); // Refresh auth context to get new team list
+            await checkStatus();
             fetchTeams();
             switchTeam(newTeam.id);
         }
-    } catch (err) {
-        console.error(err);
-    }
+    } catch (err) { console.error(err); }
   };
 
-  const inviteMember = async (e) => {
-    e.preventDefault();
+  const addMemberDirectly = async (email) => {
     if (!activeTeam) return;
-
     try {
         const res = await fetch(`/api/teams/members`, {
             method: 'POST',
@@ -124,20 +142,57 @@ const TeamDashboard = () => {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${localStorage.getItem('token')}`
             },
-            body: JSON.stringify({ email: inviteEmail, role: inviteRole, teamId: activeTeam.id })
+            body: JSON.stringify({ email, role: inviteRole, teamId: activeTeam.id })
         });
         if (res.ok) {
-            setInviteEmail('');
+            toast.success('Member added successfully');
             setShowInviteModal(false);
+            setSearchQuery('');
             fetchTeams();
-            alert('Member added successfully');
         } else {
             const data = await res.json();
-            alert(data.error);
+            toast.error(data.error);
         }
-    } catch (err) {
-        console.error(err);
-    }
+    } catch (err) { console.error(err); }
+  };
+
+  const generateInvite = async () => {
+      try {
+          // If the search query looks like an email, use it. Otherwise, generate a generic link.
+          const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+          const emailToUse = emailRegex.test(inviteEmail) ? inviteEmail : undefined;
+
+          const res = await fetch('/api/invites', {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${localStorage.getItem('token')}`
+              },
+              body: JSON.stringify({ email: emailToUse })
+          });
+
+          if (res.ok) {
+              const data = await res.json();
+              const link = `${window.location.origin}/register?invite=${data.token}`;
+              setGeneratedInviteLink(link);
+              setCopied(false);
+          } else {
+              const err = await res.json();
+              toast.error(err.error || 'Failed to generate invite');
+          }
+      } catch (e) {
+          console.error(e);
+          toast.error('Error generating invite');
+      }
+  };
+
+  const copyToClipboard = () => {
+      if (generatedInviteLink) {
+          navigator.clipboard.writeText(generatedInviteLink);
+          setCopied(true);
+          toast.success("Link copied!");
+          setTimeout(() => setCopied(false), 2000);
+      }
   };
 
   const createRole = async (e) => {
@@ -162,15 +217,23 @@ const TeamDashboard = () => {
   };
 
   const deleteRole = async (roleId) => {
-      if(!confirm('Are you sure you want to delete this role?')) return;
-      try {
-          await fetch(`/api/teams/${activeTeam.id}/roles/${roleId}`, {
-              method: 'DELETE',
-              headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-          });
-          fetchRoles(activeTeam.id);
-          fetchTeams(); // Refresh members to clear removed roles locally if needed, though simpler to just let it be
-      } catch (err) { console.error(err); }
+      setConfirmDialog({
+          isOpen: true,
+          title: "Delete Role",
+          message: "Are you sure you want to delete this role?",
+          isDestructive: true,
+          onConfirm: async () => {
+             setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+             try {
+                await fetch(`/api/teams/${activeTeam.id}/roles/${roleId}`, {
+                    method: 'DELETE',
+                    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                });
+                fetchRoles(activeTeam.id);
+                fetchTeams();
+             } catch (err) { console.error(err); }
+          }
+      });
   };
 
   const assignRole = async (userId, roleId) => {
@@ -183,27 +246,36 @@ const TeamDashboard = () => {
               },
               body: JSON.stringify({ userId })
           });
-          // Keep menu open for multiple assignments
           fetchTeams();
       } catch (err) { console.error(err); }
   };
 
   const removeRole = async (userId, roleId) => {
-       if(!confirm('Remove role from user?')) return;
-       try {
-           await fetch(`/api/teams/${activeTeam.id}/roles/${roleId}/remove`, {
-               method: 'DELETE',
-               headers: {
-                   'Content-Type': 'application/json',
-                   'Authorization': `Bearer ${localStorage.getItem('token')}`
-               },
-               body: JSON.stringify({ userId })
-           });
-           fetchTeams();
-       } catch (err) { console.error(err); }
+       setConfirmDialog({
+            isOpen: true,
+            title: "Remove Role",
+            message: "Remove role from user?",
+            isDestructive: true,
+            onConfirm: async () => {
+                setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+                try {
+                    await fetch(`/api/teams/${activeTeam.id}/roles/${roleId}/remove`, {
+                        method: 'DELETE',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        },
+                        body: JSON.stringify({ userId })
+                    });
+                    fetchTeams();
+                } catch (err) { console.error(err); }
+            }
+       });
   };
 
   if (loading) return <div>Loading...</div>;
+
+  const isOwner = teams.find(t => t.id === activeTeam?.id)?.isOwner;
 
   return (
     <div className="p-8">
@@ -250,24 +322,30 @@ const TeamDashboard = () => {
                                 <h3 className="text-xl font-bold">{activeTeam.name}</h3>
                                 <p className="text-muted-foreground text-sm">Manage members and roles</p>
                             </div>
-                            {/* We check team ownership from the team list found in 'teams' state, or activeTeam if updated */}
-                            {(teams.find(t => t.id === activeTeam.id)?.isOwner) && (
+                            {isOwner && (
                                 <div className="flex gap-2">
                                      <button
                                         onClick={() => {
-                                            if (confirm('Are you sure you want to delete this team? This action cannot be undone.')) {
-                                                fetch(`/api/teams/${activeTeam.id}`, {
-                                                    method: 'DELETE',
-                                                    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-                                                }).then(res => {
-                                                    if (res.ok) {
-                                                        fetchTeams();
-                                                        switchTeam(null);
-                                                    } else {
-                                                        res.json().then(d => alert(d.error || 'Failed to delete team'));
-                                                    }
-                                                });
-                                            }
+                                            setConfirmDialog({
+                                                isOpen: true,
+                                                title: "Delete Team",
+                                                message: "Are you sure you want to delete this team? This action cannot be undone.",
+                                                isDestructive: true,
+                                                onConfirm: () => {
+                                                    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+                                                    fetch(`/api/teams/${activeTeam.id}`, {
+                                                        method: 'DELETE',
+                                                        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                                                    }).then(res => {
+                                                        if (res.ok) {
+                                                            fetchTeams();
+                                                            switchTeam(null);
+                                                        } else {
+                                                            res.json().then(d => alert(d.error || 'Failed to delete team'));
+                                                        }
+                                                    });
+                                                }
+                                            });
                                         }}
                                         className="border border-red-500/30 text-red-500 hover:bg-red-500/10 px-3 py-1.5 rounded text-sm flex items-center gap-2"
                                      >
@@ -280,7 +358,12 @@ const TeamDashboard = () => {
                                         <Shield size={14} /> Manage Roles
                                      </button>
                                     <button
-                                        onClick={() => setShowInviteModal(true)}
+                                        onClick={() => {
+                                            setSearchQuery('');
+                                            setSearchResults([]);
+                                            setGeneratedInviteLink(null);
+                                            setShowInviteModal(true);
+                                        }}
                                         className="border border-border hover:bg-muted px-3 py-1.5 rounded text-sm flex items-center gap-2"
                                      >
                                         <UserPlus size={14} /> Add Member
@@ -296,63 +379,80 @@ const TeamDashboard = () => {
                                     teams.find(t => t.id === activeTeam.id)?.members.map(member => (
                                         <div key={member.id} className="p-4 flex items-center justify-between hover:bg-muted/10">
                                             <div>
-                                                <div className="font-medium flex items-center gap-2">
-                                                    {member.name || 'Unknown'}
-                                                    {member.teamRoles && member.teamRoles.map(r => (
-                                                        <span key={r.id} className="text-[10px] px-1.5 py-0.5 rounded text-white flex items-center gap-1" style={{ backgroundColor: r.color }}>
-                                                            {r.name}
-                                                            {(teams.find(t => t.id === activeTeam.id)?.isOwner) && (
-                                                                <button onClick={(e) => { e.stopPropagation(); removeRole(member.id, r.id); }} className="hover:opacity-80"><X size={8} /></button>
-                                                            )}
-                                                        </span>
-                                                    ))}
-                                                    {(teams.find(t => t.id === activeTeam.id)?.isOwner) && (
-                                                        <div className="relative">
-                                                            <button
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    setActiveMemberMenuId(activeMemberMenuId === member.id ? null : member.id);
-                                                                }}
-                                                                className="bg-muted hover:bg-muted/80 p-0.5 rounded-full text-muted-foreground"
-                                                                title="Add Role"
-                                                            >
-                                                                <Plus size={12} />
-                                                            </button>
-                                                            {activeMemberMenuId === member.id && (
-                                                                <div className="absolute top-full left-0 mt-1 bg-popover border border-border shadow-lg rounded z-10 w-48 py-1" onMouseLeave={() => setActiveMemberMenuId(null)}>
-                                                                    {teamRoles.length > 0 ? (
-                                                                        teamRoles.map(role => {
-                                                                            const isAssigned = member.teamRoles?.some(r => r.id === role.id);
-                                                                            return (
-                                                                                <button
-                                                                                    key={role.id}
-                                                                                    onClick={(e) => {
-                                                                                        e.stopPropagation();
-                                                                                        if (isAssigned) {
-                                                                                            removeRole(member.id, role.id);
-                                                                                        } else {
-                                                                                            assignRole(member.id, role.id);
-                                                                                        }
-                                                                                    }}
-                                                                                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted flex items-center justify-between"
-                                                                                >
-                                                                                    <div className="flex items-center gap-2">
-                                                                                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: role.color }}></div>
-                                                                                        <span>{role.name}</span>
-                                                                                    </div>
-                                                                                    {isAssigned && <Check size={12} className="text-primary" />}
-                                                                                </button>
-                                                                            );
-                                                                        })
-                                                                    ) : (
-                                                                        <div className="px-3 py-2 text-xs text-muted-foreground text-center">No roles created</div>
+                                                <div className="font-medium flex items-center gap-3">
+                                                    {/* Avatar */}
+                                                    <div className="w-8 h-8 rounded-full overflow-hidden shrink-0">
+                                                        {member.avatarPath ? (
+                                                            <img src={`/api/media/avatars/${member.avatarPath}`} alt={member.name} className="w-full h-full object-cover" />
+                                                        ) : (
+                                                            <div className="w-full h-full bg-primary/20 flex items-center justify-center text-primary text-xs font-bold">
+                                                                {member.name?.charAt(0) || 'U'}
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    <div className="flex flex-col">
+                                                        <div className="flex items-center gap-2">
+                                                            {member.name || 'Unknown'}
+                                                            {isOwner && (
+                                                                <div className="relative">
+                                                                    <button
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            setActiveMemberMenuId(activeMemberMenuId === member.id ? null : member.id);
+                                                                        }}
+                                                                        className="bg-muted hover:bg-muted/80 p-0.5 rounded-full text-muted-foreground"
+                                                                        title="Add Role"
+                                                                    >
+                                                                        <Plus size={12} />
+                                                                    </button>
+                                                                    {activeMemberMenuId === member.id && (
+                                                                        <div className="absolute top-full left-0 mt-1 bg-popover border border-border shadow-lg rounded z-10 w-48 py-1" onMouseLeave={() => setActiveMemberMenuId(null)}>
+                                                                            {teamRoles.length > 0 ? (
+                                                                                teamRoles.map(role => {
+                                                                                    const isAssigned = member.teamRoles?.some(r => r.id === role.id);
+                                                                                    return (
+                                                                                        <button
+                                                                                            key={role.id}
+                                                                                            onClick={(e) => {
+                                                                                                e.stopPropagation();
+                                                                                                if (isAssigned) {
+                                                                                                    removeRole(member.id, role.id);
+                                                                                                } else {
+                                                                                                    assignRole(member.id, role.id);
+                                                                                                }
+                                                                                            }}
+                                                                                            className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted flex items-center justify-between"
+                                                                                        >
+                                                                                            <div className="flex items-center gap-2">
+                                                                                                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: role.color }}></div>
+                                                                                                <span>{role.name}</span>
+                                                                                            </div>
+                                                                                            {isAssigned && <Check size={12} className="text-primary" />}
+                                                                                        </button>
+                                                                                    );
+                                                                                })
+                                                                            ) : (
+                                                                                <div className="px-3 py-2 text-xs text-muted-foreground text-center">No roles created</div>
+                                                                            )}
+                                                                        </div>
                                                                     )}
                                                                 </div>
                                                             )}
                                                         </div>
-                                                    )}
+                                                        {/* Roles List */}
+                                                        <div className="flex flex-wrap gap-1 mt-1">
+                                                            {member.teamRoles && member.teamRoles.map(r => (
+                                                                <span key={r.id} className="text-[10px] px-1.5 py-0.5 rounded text-white flex items-center gap-1" style={{ backgroundColor: r.color }}>
+                                                                    {r.name}
+                                                                    {isOwner && (
+                                                                        <button onClick={(e) => { e.stopPropagation(); removeRole(member.id, r.id); }} className="hover:opacity-80"><X size={8} /></button>
+                                                                    )}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    </div>
                                                 </div>
-                                                <div className="text-sm text-muted-foreground">{member.email}</div>
                                             </div>
                                             <div className="flex items-center gap-2">
                                                 <span className={`text-xs px-2 py-1 rounded-full ${
@@ -360,21 +460,28 @@ const TeamDashboard = () => {
                                                 }`}>
                                                     {member.role || 'Member'}
                                                 </span>
-                                                {(teams.find(t => t.id === activeTeam.id)?.isOwner) && member.id !== activeTeam.ownerId && (
+                                                {isOwner && member.id !== activeTeam.ownerId && (
                                                     <button
                                                         onClick={async () => {
-                                                            if (confirm(`Remove ${member.name} from team?`)) {
-                                                                try {
-                                                                    await fetch(`/api/teams/${activeTeam.id}/members/${member.id}`, {
-                                                                        method: 'DELETE',
-                                                                        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-                                                                    });
-                                                                    fetchTeams();
-                                                                } catch (e) {
-                                                                    console.error(e);
-                                                                    alert('Failed to remove member');
+                                                            setConfirmDialog({
+                                                                isOpen: true,
+                                                                title: "Remove Member",
+                                                                message: `Remove ${member.name} from team?`,
+                                                                isDestructive: true,
+                                                                onConfirm: async () => {
+                                                                    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+                                                                    try {
+                                                                        await fetch(`/api/teams/${activeTeam.id}/members/${member.id}`, {
+                                                                            method: 'DELETE',
+                                                                            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                                                                        });
+                                                                        fetchTeams();
+                                                                    } catch (e) {
+                                                                        console.error(e);
+                                                                        alert('Failed to remove member');
+                                                                    }
                                                                 }
-                                                            }
+                                                            });
                                                         }}
                                                         className="text-muted-foreground hover:text-red-500 p-1 rounded hover:bg-muted"
                                                         title="Remove Member"
@@ -402,6 +509,15 @@ const TeamDashboard = () => {
           </div>
       </div>
 
+      <ConfirmDialog
+         isOpen={confirmDialog.isOpen}
+         title={confirmDialog.title}
+         message={confirmDialog.message}
+         onConfirm={confirmDialog.onConfirm}
+         onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+         isDestructive={confirmDialog.isDestructive}
+      />
+
       {/* Create Modal */}
       {showCreateModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -422,33 +538,103 @@ const TeamDashboard = () => {
           </div>
       )}
 
-      {/* Invite Modal */}
+      {/* Invite / Add Member Modal */}
       {showInviteModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-              <form onSubmit={inviteMember} className="bg-card p-6 rounded-lg w-96 border border-border">
-                  <h3 className="font-bold mb-4">Add Member</h3>
-                  <input
-                    className="w-full bg-background border border-input rounded p-2 mb-4 text-sm"
-                    placeholder="User Email"
-                    type="email"
-                    value={inviteEmail}
-                    onChange={e => setInviteEmail(e.target.value)}
-                    required
-                  />
-                  <select
-                     className="w-full bg-background border border-input rounded p-2 mb-4 text-sm"
-                     value={inviteRole}
-                     onChange={e => setInviteRole(e.target.value)}
-                  >
-                      <option value="Member">Member</option>
-                      <option value="Co-Owner">Co-Owner</option>
-                      <option value="Client">Client</option>
-                  </select>
-                  <div className="flex justify-end gap-2">
-                      <button type="button" onClick={() => setShowInviteModal(false)} className="px-3 py-1 text-sm hover:underline">Cancel</button>
-                      <button type="submit" className="bg-primary text-primary-foreground px-3 py-1 rounded text-sm">Add</button>
+              <div className="bg-card p-6 rounded-lg w-[400px] border border-border">
+                  <h3 className="font-bold mb-4">Add Member to Team</h3>
+
+                  {!generatedInviteLink ? (
+                      <>
+                        <div className="relative mb-4">
+                            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                            <input
+                                className="w-full bg-background border border-input rounded p-2 pl-9 text-sm"
+                                placeholder="Search by name or email..."
+                                value={searchQuery}
+                                onChange={e => {
+                                    setSearchQuery(e.target.value);
+                                    setInviteEmail(e.target.value); // Use query as email fallback if typical
+                                }}
+                                autoFocus
+                            />
+                        </div>
+
+                        {/* Search Results */}
+                        {searchQuery.length >= 2 && (
+                            <div className="mb-4 max-h-40 overflow-y-auto border border-border rounded bg-muted/20">
+                                {isSearching ? (
+                                    <div className="p-2 text-xs text-center text-muted-foreground">Searching...</div>
+                                ) : searchResults.length > 0 ? (
+                                    searchResults.map(user => (
+                                        <button
+                                            key={user.id}
+                                            onClick={() => addMemberDirectly(user.email)}
+                                            className="w-full flex items-center gap-2 p-2 hover:bg-muted text-left transition-colors"
+                                        >
+                                            <div className="w-6 h-6 rounded-full overflow-hidden bg-primary/20 shrink-0">
+                                                {user.avatarPath ? (
+                                                    <img src={`/api/media/avatars/${user.avatarPath}`} className="w-full h-full object-cover"/>
+                                                ) : (
+                                                    <div className="w-full h-full flex items-center justify-center text-[10px]">{user.name.charAt(0)}</div>
+                                                )}
+                                            </div>
+                                            <div className="flex flex-col overflow-hidden">
+                                                <span className="text-sm font-medium truncate">{user.name}</span>
+                                                <span className="text-xs text-muted-foreground truncate">{user.email}</span>
+                                            </div>
+                                            <Plus size={14} className="ml-auto text-muted-foreground" />
+                                        </button>
+                                    ))
+                                ) : (
+                                    <div className="p-2 text-xs text-center text-muted-foreground">No users found</div>
+                                )}
+                            </div>
+                        )}
+
+                        <div className="flex items-center justify-between mb-4">
+                            <span className="text-xs text-muted-foreground">Or generate an invite link</span>
+                            <div className="h-px bg-border flex-1 ml-2"></div>
+                        </div>
+
+                        <button
+                            onClick={generateInvite}
+                            className="w-full border border-primary/30 bg-primary/5 hover:bg-primary/10 text-primary py-2 rounded text-sm flex items-center justify-center gap-2 transition-colors"
+                        >
+                            Generate Invite Link
+                        </button>
+                      </>
+                  ) : (
+                      <div className="space-y-4 animate-in fade-in zoom-in-95">
+                          <div className="p-3 bg-muted/30 rounded border border-border flex flex-col gap-2">
+                              <span className="text-xs font-medium text-muted-foreground">Invite Link Generated:</span>
+                              <div className="flex gap-2">
+                                  <input
+                                    readOnly
+                                    value={generatedInviteLink}
+                                    className="flex-1 bg-background border border-input rounded px-2 py-1 text-xs select-all"
+                                  />
+                                  <button onClick={copyToClipboard} className="p-1.5 bg-primary text-primary-foreground rounded hover:opacity-90">
+                                      {copied ? <Check size={14} /> : <Copy size={14} />}
+                                  </button>
+                              </div>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                              Share this link with the person you want to invite. They will be able to register and you can add them to the team afterwards.
+                          </p>
+                          <button
+                             onClick={() => { setGeneratedInviteLink(null); setSearchQuery(''); }}
+                             className="text-xs text-primary hover:underline w-full text-center"
+                          >
+                              Back to search
+                          </button>
+                      </div>
+                  )}
+
+                  <div className="flex justify-end gap-2 mt-4 border-t border-border pt-4">
+                      <button onClick={() => setShowInviteModal(false)} className="px-3 py-1 text-sm hover:underline">Close</button>
                   </div>
-              </form>
+              </div>
           </div>
       )}
 

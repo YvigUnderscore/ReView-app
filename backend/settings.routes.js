@@ -5,6 +5,7 @@ const fs = require('fs');
 const { PrismaClient } = require('@prisma/client');
 const { authenticateToken } = require('./middleware');
 const { initEmailService } = require('./services/emailService');
+const { recalculateAllStorage } = require('./utils/storage');
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -23,12 +24,10 @@ const storage = multer.diskStorage({
         cb(null, SYSTEM_DIR);
     },
     filename: (req, file, cb) => {
-        // Always name it icon.png (or appropriate ext) or allow multiple?
-        // User wants "ICO" to be targeted.
-        // Let's stick to a fixed name for simplicity or store path in DB.
-        // Storing path in DB allows versioning/cache busting.
+        // Check fieldname to decide prefix
+        const prefix = file.fieldname === 'sound' ? 'notification-sound-' : 'site-icon-';
         const ext = path.extname(file.originalname);
-        const filename = `site-icon-${Date.now()}${ext}`;
+        const filename = `${prefix}${Date.now()}${ext}`;
         cb(null, filename);
     }
 });
@@ -42,11 +41,13 @@ router.get('/config', async (req, res) => {
         const titleSetting = await prisma.systemSetting.findUnique({ where: { key: 'site_title' } });
         const iconSetting = await prisma.systemSetting.findUnique({ where: { key: 'site_icon' } });
         const dateFormatSetting = await prisma.systemSetting.findUnique({ where: { key: 'date_format' } });
+        const soundSetting = await prisma.systemSetting.findUnique({ where: { key: 'notification_sound' } });
 
         res.json({
             title: titleSetting ? titleSetting.value : 'ReView',
-            iconUrl: iconSetting ? `/api/media/system/${iconSetting.value}` : '/vite.svg', // Default to vite svg or whatever
-            dateFormat: dateFormatSetting ? dateFormatSetting.value : 'DD/MM/YYYY'
+            iconUrl: iconSetting ? `/api/media/system/${iconSetting.value}` : '/vite.svg',
+            dateFormat: dateFormatSetting ? dateFormatSetting.value : 'DD/MM/YYYY',
+            notificationSoundUrl: soundSetting ? `/api/media/system/${soundSetting.value}` : null
         });
     } catch (e) {
         console.error(e);
@@ -59,7 +60,7 @@ router.get('/config', async (req, res) => {
 router.patch('/', authenticateToken, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
 
-    const { title, dateFormat } = req.body;
+    const { title, dateFormat, retentionDays } = req.body;
     try {
         const updates = [];
         if (title) {
@@ -74,6 +75,13 @@ router.patch('/', authenticateToken, async (req, res) => {
                 where: { key: 'date_format' },
                 update: { value: dateFormat },
                 create: { key: 'date_format', value: dateFormat }
+            }));
+        }
+        if (retentionDays !== undefined) {
+             updates.push(prisma.systemSetting.upsert({
+                where: { key: 'trash_retention_days' },
+                update: { value: String(retentionDays) },
+                create: { key: 'trash_retention_days', value: String(retentionDays) }
             }));
         }
         await prisma.$transaction(updates);
@@ -111,6 +119,49 @@ router.post('/icon', authenticateToken, upload.single('icon'), async (req, res) 
     } catch (e) {
         console.error(e);
         res.status(500).json({ error: 'Failed to update icon' });
+    }
+});
+
+// POST /api/admin/settings/sound
+// Admin only
+router.post('/sound', authenticateToken, upload.single('sound'), async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+    // Validate MIME type (MP3)
+    // audio/mpeg is standard for MP3.
+    const allowedMimeTypes = ['audio/mpeg', 'audio/mp3'];
+    if (!allowedMimeTypes.includes(req.file.mimetype)) {
+        if (req.file.path && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
+        }
+        return res.status(400).json({ error: 'Invalid file type. Only MP3 allowed.' });
+    }
+
+    try {
+        await prisma.systemSetting.upsert({
+            where: { key: 'notification_sound' },
+            update: { value: req.file.filename },
+            create: { key: 'notification_sound', value: req.file.filename }
+        });
+        res.json({ notificationSoundUrl: `/api/media/system/${req.file.filename}` });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: 'Failed to update sound' });
+    }
+});
+
+// GET /api/admin/settings/retention
+router.get('/retention', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+
+    try {
+        const setting = await prisma.systemSetting.findUnique({ where: { key: 'trash_retention_days' } });
+        res.json({ retentionDays: setting ? setting.value : '7' });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: 'Failed to fetch retention settings' });
     }
 });
 
@@ -159,6 +210,80 @@ router.patch('/smtp', authenticateToken, async (req, res) => {
     } catch (e) {
         console.error(e);
         res.status(500).json({ error: 'Failed to update smtp settings' });
+    }
+});
+
+// GET /api/admin/settings/storage
+router.get('/storage', authenticateToken, async (req, res) => {
+    // Optional: Allow non-admins to read this if we use it for generic UI limits,
+    // but typically users only care about their OWN limit (which is already in /auth/me).
+    // Admin dashboard definitely needs it.
+    // If we want Sidebar to show "Global Limit" when no specific limit is set, we can either:
+    // 1. Fetch it here (if user has access).
+    // 2. Or just rely on the fallback logic in Sidebar (which is currently hardcoded).
+    // Let's allow authenticated users to read it to keep Sidebar accurate.
+
+    try {
+        const teamLimitSetting = await prisma.systemSetting.findUnique({ where: { key: 'storage_limit_team' } });
+        const userLimitSetting = await prisma.systemSetting.findUnique({ where: { key: 'storage_limit_user' } });
+
+        // Defaults in bytes
+        const defaults = {
+            teamLimit: 25 * 1024 * 1024 * 1024,
+            userLimit: 10 * 1024 * 1024 * 1024
+        };
+
+        res.json({
+            teamLimit: teamLimitSetting ? teamLimitSetting.value : defaults.teamLimit.toString(),
+            userLimit: userLimitSetting ? userLimitSetting.value : defaults.userLimit.toString()
+        });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: 'Failed to fetch storage settings' });
+    }
+});
+
+// PATCH /api/admin/settings/storage
+router.patch('/storage', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+
+    const { userLimit, teamLimit } = req.body; // Expecting bytes as numbers or strings
+
+    try {
+        const updates = [];
+        if (userLimit !== undefined) {
+             updates.push(prisma.systemSetting.upsert({
+                where: { key: 'storage_limit_user' },
+                update: { value: String(userLimit) },
+                create: { key: 'storage_limit_user', value: String(userLimit) }
+            }));
+        }
+        if (teamLimit !== undefined) {
+             updates.push(prisma.systemSetting.upsert({
+                where: { key: 'storage_limit_team' },
+                update: { value: String(teamLimit) },
+                create: { key: 'storage_limit_team', value: String(teamLimit) }
+            }));
+        }
+
+        await prisma.$transaction(updates);
+        res.json({ message: 'Storage settings updated' });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: 'Failed to update storage settings' });
+    }
+});
+
+// POST /api/admin/storage/recalculate
+router.post('/storage/recalculate', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+
+    try {
+        await recalculateAllStorage();
+        res.json({ message: 'Storage recalculation started/completed' });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: 'Failed to recalculate storage' });
     }
 });
 

@@ -14,7 +14,7 @@
     "@react-three/fiber": "^9.4.2",
     "axios": "^1.13.2",
     "clsx": "^2.1.1",
-    "framer-motion": "^12.24.0",
+    "framer-motion": "^12.24.10",
     "lucide-react": "^0.561.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

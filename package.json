@@ -6,6 +6,7 @@
     "supertest": "^7.1.4"
   },
   "dependencies": {
+    "framer-motion": "^12.24.10",
     "sonner": "^2.0.7"
   }
 }

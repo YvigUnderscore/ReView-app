@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MessageSquare, Clock, CheckCircle, Circle, Filter, Pencil, Eye, EyeOff, Reply, X, Download, FileText, Table, ExternalLink, Minimize2, Smile } from 'lucide-react';
+import { MessageSquare, Clock, CheckCircle, Circle, Filter, Pencil, Eye, EyeOff, Reply, X, Download, FileText, Table, ExternalLink, Minimize2, Smile, Trash2, Bell, BellOff, Image as ImageIcon, X as XIcon } from 'lucide-react';
 import MentionsInput from './MentionsInput';
 import { formatDate } from '../lib/dateUtils';
 import { useBranding } from '../context/BrandingContext';
+import { toast } from 'sonner';
+import ConfirmDialog from './ConfirmDialog';
 
 const renderContent = (content) => {
     if (!content) return null;
@@ -15,10 +17,11 @@ const renderContent = (content) => {
     });
 };
 
-const CommentItem = ({ comment, onCommentClick, onToggleResolved, onToggleVisibility, onReply, onReact, isGuest, currentUserId, highlightedCommentId, onAssignTask, teamMembers }) => {
+const CommentItem = ({ comment, onCommentClick, onToggleResolved, onToggleVisibility, onReply, onReact, isGuest, currentUserId, highlightedCommentId, onAssignTask, teamMembers, onDelete, canDelete, guestName }) => {
     const itemRef = useRef(null);
     const [showAssignSelect, setShowAssignSelect] = useState(false);
     const [showReactionPicker, setShowReactionPicker] = useState(false);
+    const [showImageModal, setShowImageModal] = useState(false);
     const { dateFormat } = useBranding();
 
     useEffect(() => {
@@ -172,6 +175,17 @@ const CommentItem = ({ comment, onCommentClick, onToggleResolved, onToggleVisibi
                          >
                              <Reply size={14} />
                          </button>
+                         {(canDelete || (isGuest && comment.guestName === guestName)) && (
+                             <button
+                                 onClick={() => {
+                                     onDelete(comment.id);
+                                 }}
+                                 className="text-muted-foreground hover:text-red-500 p-1"
+                                 title="Delete"
+                             >
+                                 <Trash2 size={14} />
+                             </button>
+                         )}
                     </div>
                 </div>
                 <div
@@ -181,10 +195,47 @@ const CommentItem = ({ comment, onCommentClick, onToggleResolved, onToggleVisibi
                     {renderContent(comment.content)}
                     {comment.annotation && (
                         <div className="absolute top-2 right-2 text-xs text-primary bg-primary/10 px-1 rounded">
-                            Has Drawing
+                            🎨
                         </div>
                     )}
+                    {comment.attachmentPath && (
+                         <div
+                             className="mt-2 relative rounded overflow-hidden cursor-zoom-in"
+                             onClick={(e) => {
+                                 e.stopPropagation();
+                                 setShowImageModal(true);
+                             }}
+                         >
+                             <img
+                                 src={`/api/media/${comment.attachmentPath}`}
+                                 alt="Attachment"
+                                 className="max-h-48 w-auto rounded border border-border"
+                             />
+                         </div>
+                    )}
                 </div>
+
+                {showImageModal && (
+                    <div
+                        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+                        onClick={(e) => {
+                             e.stopPropagation();
+                             setShowImageModal(false);
+                        }}
+                    >
+                         <img
+                             src={`/api/media/${comment.attachmentPath}`}
+                             alt="Full Attachment"
+                             className="max-w-full max-h-full rounded shadow-lg"
+                         />
+                         <button
+                             onClick={() => setShowImageModal(false)}
+                             className="absolute top-4 right-4 bg-white/20 hover:bg-white/40 text-white rounded-full p-2"
+                         >
+                             <X size={24} />
+                         </button>
+                    </div>
+                )}
 
                 {/* Reactions Display */}
                 {Object.keys(reactions).length > 0 && (
@@ -233,6 +284,9 @@ const CommentItem = ({ comment, onCommentClick, onToggleResolved, onToggleVisibi
                                 highlightedCommentId={highlightedCommentId}
                                 onAssignTask={onAssignTask}
                                 teamMembers={teamMembers}
+                                onDelete={onDelete}
+                                canDelete={canDelete}
+                                guestName={guestName}
                             />
                         ))}
                     </div>
@@ -252,6 +306,7 @@ const ActivityPanel = ({
     onCommentClick,
     onCommentAdded,
     onCommentUpdated,
+    onCommentDeleted,
     pendingAnnotations,
     getAnnotations,
     getCameraState,
@@ -273,16 +328,35 @@ const ActivityPanel = ({
     isWindowMode
 }) => {
   const [newComment, setNewComment] = useState('');
+  const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, title: '', message: '', onConfirm: () => {}, isDestructive: false });
   const [assigneeId, setAssigneeId] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [filter, setFilter] = useState('all');
   const [replyingTo, setReplyingTo] = useState(null);
   const [teamMembers, setTeamMembers] = useState([]);
   const [teamRoles, setTeamRoles] = useState([]);
+  const [teamOwnerId, setTeamOwnerId] = useState(null);
+  const [currentUserId, setCurrentUserId] = useState(null);
+  const [userRole, setUserRole] = useState(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [pastedImage, setPastedImage] = useState(null);
+  const [attachment, setAttachment] = useState(null);
+  const [isMuted, setIsMuted] = useState(false);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
       if (!isGuest && projectId) {
+          // Fetch current user details to know ID and Role
+          fetch('/api/auth/me', {
+              headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+          })
+          .then(res => res.json())
+          .then(user => {
+              setCurrentUserId(user.id);
+              setUserRole(user.role);
+          })
+          .catch(err => console.error("Failed to fetch user", err));
+
           fetch(`/api/projects/${projectId}`, {
               headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
           })
@@ -291,11 +365,79 @@ const ActivityPanel = ({
               if (data.team) {
                   setTeamMembers(data.team.members || []);
                   setTeamRoles(data.team.roles || []);
+                  setTeamOwnerId(data.team.ownerId);
               }
+              setIsMuted(!!data.isMuted);
           })
           .catch(err => console.error("Failed to fetch team data", err));
       }
   }, [isGuest, projectId]);
+
+  const handleDeleteComment = async (commentId) => {
+      try {
+          let url;
+          if (isGuest) {
+               url = `/api/client/projects/${clientToken}/comments/${commentId}`;
+          } else {
+               url = `/api/projects/comments/${commentId}`;
+          }
+
+          const res = await fetch(url, {
+              method: 'DELETE',
+              headers: {
+                  'Content-Type': 'application/json',
+                  ...(!isGuest && { 'Authorization': `Bearer ${localStorage.getItem('token')}` }),
+              },
+              body: isGuest ? JSON.stringify({ guestName }) : undefined
+          });
+
+          if (res.ok) {
+              if (onCommentDeleted) onCommentDeleted(commentId);
+          } else {
+              toast.error("Failed to delete comment");
+          }
+      } catch(err) {
+          console.error(err);
+      }
+  };
+
+  const handleToggleMute = async () => {
+      if (!projectId || isGuest) return;
+
+      try {
+          const method = isMuted ? 'DELETE' : 'POST';
+          const res = await fetch(`/api/projects/${projectId}/mute`, {
+              method,
+              headers: {
+                  'Authorization': `Bearer ${localStorage.getItem('token')}`
+              }
+          });
+
+          if (res.ok) {
+              setIsMuted(!isMuted);
+          }
+      } catch (err) {
+          console.error("Failed to toggle mute", err);
+      }
+  };
+
+  const handlePaste = (e) => {
+      if (e.clipboardData && e.clipboardData.items) {
+          const items = e.clipboardData.items;
+          for (let i = 0; i < items.length; i++) {
+              if (items[i].type.indexOf("image") !== -1) {
+                  e.preventDefault();
+                  const blob = items[i].getAsFile();
+                  const reader = new FileReader();
+                  reader.onload = (event) => {
+                      setPastedImage(event.target.result);
+                  };
+                  reader.readAsDataURL(blob);
+                  return; // Only take the first image
+              }
+          }
+      }
+  };
 
   const handleExport = async (format) => {
       if (!projectId) return;
@@ -312,14 +454,14 @@ const ActivityPanel = ({
               downloadName = `export-${projectId}-${videoId}.${format}`;
           } else if (threeDAssetId) {
              if (format === 'csv') {
-                 alert("CSV export is not available for 3D assets.");
+                 toast.error("CSV export is not available for 3D assets.");
                  return;
              }
              endpoint = `/api/projects/${projectId}/3d/${threeDAssetId}/export/${format}`;
              downloadName = `export-${projectId}-3d-${threeDAssetId}.${format}`;
           } else if (imageId) {
               if (format === 'csv') {
-                  alert("CSV export is not available for images.");
+                  toast.error("CSV export is not available for images.");
                   return;
               }
               endpoint = `/api/projects/${projectId}/images/${imageId}/export/${format}`;
@@ -345,7 +487,7 @@ const ActivityPanel = ({
           document.body.removeChild(a);
       } catch (err) {
           console.error("Export error:", err);
-          alert("Failed to export comments");
+          toast.error("Failed to export comments");
       }
   };
 
@@ -375,45 +517,55 @@ const ActivityPanel = ({
          screenshot = getScreenshot();
      }
 
-     if (!newComment.trim() && (!annotations || annotations.length === 0)) return;
+     // Pasted image overrides viewer screenshot if present, or acts as the screenshot
+     if (pastedImage) {
+         screenshot = pastedImage;
+     }
+
+     if (!newComment.trim() && (!annotations || annotations.length === 0) && !pastedImage && !attachment) return;
      setSubmitting(true);
 
      try {
-        let url, body, headers;
+        let url;
         const effectiveParentId = replyingTo ? (replyingTo.parentId || replyingTo.id) : null;
 
-        const commonBody = {
-            content: newComment || 'Visual Annotation',
-            timestamp: (selectionStart !== null && selectionStart !== undefined) ? selectionStart : (currentTime || 0),
-            duration: rangeDuration || null,
-            annotation: annotations && annotations.length > 0 ? annotations : null,
-            cameraState: cameraState,
-            parentId: effectiveParentId,
-            assigneeId: assigneeId || null,
-            screenshot: screenshot
-        };
+        const formData = new FormData();
+        formData.append('content', newComment || 'Visual Annotation');
+        formData.append('timestamp', (selectionStart !== null && selectionStart !== undefined) ? selectionStart : (currentTime || 0));
+        if (rangeDuration) formData.append('duration', rangeDuration);
+        if (annotations && annotations.length > 0) formData.append('annotation', JSON.stringify(annotations));
+        if (cameraState) formData.append('cameraState', JSON.stringify(cameraState));
+        if (effectiveParentId) formData.append('parentId', effectiveParentId);
+        if (assigneeId) formData.append('assigneeId', assigneeId);
+        if (screenshot) formData.append('screenshot', screenshot);
 
-        if (videoId) commonBody.videoId = videoId;
-        if (imageId) commonBody.imageId = imageId;
-        if (threeDAssetId) commonBody.threeDAssetId = threeDAssetId;
+        if (videoId) formData.append('videoId', videoId);
+        if (imageId) formData.append('imageId', imageId);
+        if (threeDAssetId) formData.append('threeDAssetId', threeDAssetId);
+
+        // Attachment Logic: Pasted Image OR Uploaded File
+        if (pastedImage) {
+             // Convert DataURL to Blob and append as file
+             const res = await fetch(pastedImage);
+             const blob = await res.blob();
+             formData.append('attachment', blob, 'pasted-image.png');
+        } else if (attachment) {
+             formData.append('attachment', attachment);
+        }
 
         if (isGuest) {
             url = `/api/client/projects/${clientToken}/comments`;
-            body = { ...commonBody, guestName: guestName };
-            headers = { 'Content-Type': 'application/json' };
+            formData.append('guestName', guestName);
         } else {
             url = `/api/projects/${projectId}/comments`;
-            body = commonBody;
-            headers = {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${localStorage.getItem('token')}`
-            };
         }
+
+        const headers = isGuest ? {} : { 'Authorization': `Bearer ${localStorage.getItem('token')}` };
 
         const res = await fetch(url, {
            method: 'POST',
            headers: headers,
-           body: JSON.stringify(body)
+           body: formData
         });
 
         if (res.ok) {
@@ -422,6 +574,9 @@ const ActivityPanel = ({
            setNewComment('');
            setAssigneeId('');
            setReplyingTo(null);
+           setPastedImage(null);
+           setAttachment(null);
+           if(fileInputRef.current) fileInputRef.current.value = '';
            if (onClearAnnotations) onClearAnnotations();
         }
      } catch (err) {
@@ -524,11 +679,26 @@ const ActivityPanel = ({
 
   return (
     <div className="w-full h-full md:w-full bg-card flex flex-col">
+       <ConfirmDialog
+         isOpen={confirmDialog.isOpen}
+         title={confirmDialog.title}
+         message={confirmDialog.message}
+         onConfirm={confirmDialog.onConfirm}
+         onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+         isDestructive={confirmDialog.isDestructive}
+      />
       <div className="h-14 border-b border-border flex items-center px-4 justify-between bg-muted/20 shrink-0">
          <div className="flex items-center gap-2">
              <span className="font-semibold text-sm">Comments</span>
              {!isGuest && (
                  <div className="flex items-center gap-1">
+                    <button
+                        onClick={handleToggleMute}
+                        className={`p-1 rounded hover:bg-muted ${isMuted ? 'text-red-500' : 'text-muted-foreground hover:text-foreground'}`}
+                        title={isMuted ? "Unmute Project" : "Mute Project Notifications"}
+                    >
+                        {isMuted ? <BellOff size={14} /> : <Bell size={14} />}
+                    </button>
                     <div className="relative">
                         <button
                             onClick={() => setShowExportMenu(!showExportMenu)}
@@ -551,15 +721,6 @@ const ActivityPanel = ({
                         )}
                     </div>
                     {/* Collapsible and Popout Controls */}
-                    {!isWindowMode && onPopout && (
-                        <button
-                            onClick={onPopout}
-                            className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-                            title="Open in new window"
-                        >
-                            <ExternalLink size={14} />
-                        </button>
-                    )}
                     {!isWindowMode && onCollapse && (
                          <button
                             onClick={onCollapse}
@@ -597,11 +758,25 @@ const ActivityPanel = ({
                onToggleVisibility={toggleVisibility}
                onReply={(c) => setReplyingTo(c)}
                isGuest={isGuest}
-               currentUserId={null}
+               currentUserId={currentUserId}
                highlightedCommentId={highlightedCommentId}
                onAssignTask={handleAssignTask}
                onReact={handleReact}
                teamMembers={teamMembers}
+               onDelete={(commentId) => {
+                   setConfirmDialog({
+                       isOpen: true,
+                       title: "Delete Comment",
+                       message: "Are you sure you want to delete this comment?",
+                       onConfirm: () => {
+                           handleDeleteComment(commentId);
+                           setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+                       },
+                       isDestructive: true
+                   });
+               }}
+               guestName={guestName}
+               canDelete={!isGuest && (currentUserId === comment.userId || userRole === 'admin' || currentUserId === teamOwnerId)}
            />
         ))}
 
@@ -633,11 +808,23 @@ const ActivityPanel = ({
                <span>Range: {rangeDuration.toFixed(1)}s</span>
             </div>
          )}
+         {pastedImage && (
+             <div className="mb-2 relative w-20 h-20 border border-border rounded overflow-hidden group">
+                 <img src={pastedImage} alt="Pasted" className="w-full h-full object-cover" />
+                 <button
+                    onClick={() => setPastedImage(null)}
+                    className="absolute top-0 right-0 bg-black/50 text-white p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                 >
+                     <X size={12} />
+                 </button>
+             </div>
+         )}
          <div className="flex flex-col gap-2">
             <MentionsInput
                 value={newComment}
                 onChange={e => setNewComment(e.target.value)}
                 onFocus={onInputFocus}
+                onPaste={handlePaste}
                 placeholder={replyingTo ? "Write a reply..." : (isGuest ? `Posting as ${guestName}...` : "Leave a comment...")}
                 className="w-full bg-background border border-input rounded-md p-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary min-h-[80px]"
                 onKeyDown={e => {
@@ -651,7 +838,25 @@ const ActivityPanel = ({
             />
 
             <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2"></div>
+                <div className="flex items-center gap-2">
+                    <input
+                        type="file"
+                        ref={fileInputRef}
+                        accept="image/png, image/jpeg, image/webp"
+                        className="hidden"
+                        onChange={(e) => {
+                            const file = e.target.files[0];
+                            if (file) {
+                                if (file.size > 10 * 1024 * 1024) {
+                                    toast.error("File too large (Max 10MB)");
+                                    return;
+                                }
+                                setAttachment(file);
+                                setPastedImage(null); // Clear pasted if file selected
+                            }
+                        }}
+                    />
+                </div>
                 <div className="flex items-center gap-2">
                    {!replyingTo && (
                        <span className="text-xs font-mono text-muted-foreground bg-muted px-1 rounded">
@@ -659,11 +864,18 @@ const ActivityPanel = ({
                        </span>
                    )}
                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="bg-secondary text-secondary-foreground hover:bg-secondary/80 p-1.5 rounded transition-colors flex items-center gap-1"
+                      title="Upload Image (Max 10MB)"
+                   >
+                      <ImageIcon size={16} />
+                   </button>
+                   <button
                       onClick={onToggleDrawing}
-                      className="bg-muted text-muted-foreground hover:text-foreground p-1 rounded hover:bg-muted/80 transition-colors"
+                      className="bg-primary/20 text-primary border border-primary/50 hover:bg-primary/30 p-1.5 rounded transition-colors"
                       title="Draw on video"
                    >
-                      <Pencil size={14} />
+                      <span className="text-sm">🎨</span>
                    </button>
                    <button
                       onClick={handleSend}

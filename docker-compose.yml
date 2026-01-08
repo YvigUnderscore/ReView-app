@@ -2,7 +2,7 @@ services:
   frontend:
     build: ./frontend
     ports:
-      - "3429:80"
+      - "${PORT:-3429}:80"
     depends_on:
       - backend
     restart: always
@@ -10,7 +10,7 @@ services:
   backend:
     build: ./backend
     ports:
-      - "3430:3000" # Optional: Expose for debugging, though frontend proxies to internal 3000
+      - "${BPORT:-3430}:3000" # Optional: Expose for debugging, though frontend proxies to internal 3000
     environment:
       - PORT=3000
       - DATA_PATH=/app/data

@@ -7,7 +7,7 @@
 The application requires the following environment variables to be set (e.g., in a `.env` file):
 - `JWT_SECRET`: A strong, random string used to sign authentication tokens. **Required.**
 - `DATA_PATH`: Path to store application data (defaults to internal storage).
-
+- `PORT`: If needed you can change the default value (3429) of your instance.
 ## Quick Start
 
 1. **Clone the repository:**
@@ -21,8 +21,10 @@ The application requires the following environment variables to be set (e.g., in
    docker-compose up -d --build
    ```
 
+    *Note: You can change the port by adding `PORT=YOUR_PORT` to your `.env` file. Default is 3429.*
+
 3. **Access the interface:**
-   Open your browser at `http://localhost:3429`.
+    Open your browser at `http://localhost:3429` (or the port you configured).
 
 ## Configuration
 - **First Account:** The first user to register automatically becomes the **Administrator**.

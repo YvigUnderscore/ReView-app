@@ -103,8 +103,16 @@ router.post('/:roleId/assign', authenticateToken, async (req, res) => {
         }
 
         // Verify user belongs to team
-        const targetUser = await prisma.user.findUnique({ where: { id: userId } });
-        if (targetUser.teamId !== teamId) {
+        const targetUser = await prisma.user.findUnique({
+            where: { id: userId },
+            include: { teams: true, ownedTeams: true }
+        });
+
+        if (!targetUser) return res.status(404).json({ error: 'User not found' });
+
+        const isMember = targetUser.teams.some(t => t.id === teamId) || targetUser.ownedTeams.some(t => t.id === teamId);
+
+        if (!isMember) {
             return res.status(400).json({ error: 'User is not in this team' });
         }
 

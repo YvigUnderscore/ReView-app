@@ -126,8 +126,41 @@ const ImageViewer = forwardRef(({ src, onNext, onPrev, hasPrev, hasNext, annotat
           } else if (shape.tool === 'circle') {
               ctx.ellipse(p.x + dims.w/2, p.y + dims.h/2, Math.abs(dims.w/2), Math.abs(dims.h/2), 0, 0, 2 * Math.PI);
               ctx.stroke();
+          } else if (shape.tool === 'line') {
+              ctx.moveTo(p.x, p.y);
+              ctx.lineTo(p.x + dims.w, p.y + dims.h);
+              ctx.stroke();
+          } else if (shape.tool === 'arrow') {
+              const headlen = width * 3 * scaleFactor;
+              const tox = p.x + dims.w;
+              const toy = p.y + dims.h;
+              const angle = Math.atan2(toy - p.y, tox - p.x);
+              ctx.moveTo(p.x, p.y);
+              ctx.lineTo(tox, toy);
+              ctx.lineTo(tox - headlen * Math.cos(angle - Math.PI / 6), toy - headlen * Math.sin(angle - Math.PI / 6));
+              ctx.moveTo(tox, toy);
+              ctx.lineTo(tox - headlen * Math.cos(angle + Math.PI / 6), toy - headlen * Math.sin(angle + Math.PI / 6));
+              ctx.stroke();
+          } else if (shape.tool === 'text') {
+               ctx.font = `${(width * 3) * scaleFactor}px sans-serif`;
+               ctx.fillText(shape.text || 'Text', p.x, p.y);
+          } else if (shape.tool === 'curve') {
+              const startX = p.x;
+              const startY = p.y;
+              const endX = p.x + dims.w;
+              const endY = p.y + dims.h;
+              const cpX = (startX + endX) / 2;
+              const cpY = (startY + endY) / 2 - Math.abs(dims.w) * 0.5;
+              ctx.moveTo(startX, startY);
+              ctx.quadraticCurveTo(cpX, cpY, endX, endY);
+              ctx.stroke();
+              const angle = Math.atan2(endY - cpY, endX - cpX);
+              const headlen = width * 3 * scaleFactor;
+              ctx.lineTo(endX - headlen * Math.cos(angle - Math.PI / 6), endY - headlen * Math.sin(angle - Math.PI / 6));
+              ctx.moveTo(endX, endY);
+              ctx.lineTo(endX - headlen * Math.cos(angle + Math.PI / 6), endY - headlen * Math.sin(angle + Math.PI / 6));
+              ctx.stroke();
           }
-          // ... (Can add other tools if needed, keeping it basic for now)
       }
 
       ctx.globalAlpha = 1.0;
@@ -267,6 +300,20 @@ const ImageViewer = forwardRef(({ src, onNext, onPrev, hasPrev, hasNext, annotat
           setCurrentAnnotation({
               tool, color, strokeWidth, points: [pos.norm], isNormalized: true
           });
+      } else if (tool === 'text') {
+          const text = prompt("Enter text:");
+          if (text) {
+              setLocalAnnotations([...localAnnotations, {
+                  tool,
+                  color,
+                  strokeWidth,
+                  x: pos.norm.x,
+                  y: pos.norm.y,
+                  text,
+                  isNormalized: true
+              }]);
+          }
+          setIsDrawing(false);
       } else {
           setCurrentAnnotation({
               tool, color, strokeWidth, x: pos.norm.x, y: pos.norm.y, w: 0, h: 0, isNormalized: true
@@ -352,6 +399,10 @@ const ImageViewer = forwardRef(({ src, onNext, onPrev, hasPrev, hasNext, annotat
                 <ToolButton icon={Pencil} active={tool === 'pencil'} onClick={() => setTool('pencil')} />
                 <ToolButton icon={Square} active={tool === 'rect'} onClick={() => setTool('rect')} />
                 <ToolButton icon={Circle} active={tool === 'circle'} onClick={() => setTool('circle')} />
+                <ToolButton icon={MoveRight} active={tool === 'arrow'} onClick={() => setTool('arrow')} />
+                <ToolButton icon={CornerUpRight} active={tool === 'curve'} onClick={() => setTool('curve')} />
+                <ToolButton icon={Minus} active={tool === 'line'} onClick={() => setTool('line')} />
+                <ToolButton icon={Type} active={tool === 'text'} onClick={() => setTool('text')} />
                 <ToolButton icon={Highlighter} active={tool === 'highlighter'} onClick={() => setTool('highlighter')} />
                 <ToolButton icon={Eraser} active={tool === 'eraser'} onClick={() => setTool('eraser')} />
                 <div className="w-px h-4 bg-white/20 mx-1" />
