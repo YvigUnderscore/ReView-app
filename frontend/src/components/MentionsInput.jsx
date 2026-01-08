@@ -8,7 +8,8 @@ const MentionsInput = ({
     onFocus,
     className,
     teamMembers = [],
-    teamRoles = []
+    teamRoles = [],
+    onPaste
 }) => {
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [cursorPosition, setCursorPosition] = useState(0);
@@ -121,6 +122,7 @@ const MentionsInput = ({
                 onChange={handleChange}
                 onKeyDown={handleKeyDown}
                 onFocus={onFocus}
+                onPaste={onPaste}
                 placeholder={placeholder}
                 className={className}
             />

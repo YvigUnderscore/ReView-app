@@ -6,6 +6,16 @@ const fs = require('fs');
 const { createAndBroadcast } = require('./services/notificationService');
 
 const router = express.Router();
+
+function slugify(text) {
+  return text
+    .toString()
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^\w\-]+/g, '')
+    .replace(/\-\-+/g, '-');
+}
 const prisma = new PrismaClient();
 
 // GET /teams: Get all my teams
@@ -22,6 +32,7 @@ router.get('/', authenticateToken, async (req, res) => {
                 name: true,
                 email: true,
                 role: true,
+                avatarPath: true,
                 teamRoles: true
               }
             },
@@ -36,6 +47,7 @@ router.get('/', authenticateToken, async (req, res) => {
                 name: true,
                 email: true,
                 role: true,
+                avatarPath: true,
                 teamRoles: true
               }
             },
@@ -71,12 +83,25 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 
   try {
-    // No restriction on existing team
+    let baseSlug = slugify(name);
+    if (!baseSlug) baseSlug = `team-${Date.now()}`;
+    let slug = baseSlug;
+    let counter = 1;
+
+    // Ensure uniqueness
+    while (true) {
+        const existing = await prisma.team.findUnique({ where: { slug } });
+        if (!existing) break;
+        slug = `${baseSlug}-${counter}`;
+        counter++;
+    }
+
     // Transaction to create team and assign user
     const team = await prisma.$transaction(async (prisma) => {
       const newTeam = await prisma.team.create({
         data: {
           name,
+          slug,
           owner: { connect: { id: req.user.id } },
           members: { connect: { id: req.user.id } } // Owner is also a member
         }

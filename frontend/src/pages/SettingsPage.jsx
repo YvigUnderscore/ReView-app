@@ -3,11 +3,14 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { User, Bell, Users, AlertTriangle, Save, Trash2, Mail, Smartphone, ArrowRight, ShieldAlert } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { toast } from 'sonner';
 
 const SettingsPage = () => {
     const { user, setUser, logout } = useAuth(); // Assuming logout exists or I can just clear token
     const [activeTab, setActiveTab] = useState('profile');
     const navigate = useNavigate();
+    const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, title: '', message: '', onConfirm: () => {}, isDestructive: false });
 
     const tabs = [
         { id: 'profile', label: 'Profile', icon: User },
@@ -18,6 +21,14 @@ const SettingsPage = () => {
 
     return (
         <div className="flex h-full bg-background">
+            <ConfirmDialog
+                isOpen={confirmDialog.isOpen}
+                title={confirmDialog.title}
+                message={confirmDialog.message}
+                onConfirm={confirmDialog.onConfirm}
+                onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+                isDestructive={confirmDialog.isDestructive}
+            />
             {/* Sidebar */}
             <div className="w-64 border-r border-border p-4">
                 <h1 className="text-xl font-bold mb-6 px-2">Settings</h1>
@@ -44,8 +55,8 @@ const SettingsPage = () => {
                 <div className="max-w-2xl mx-auto">
                     {activeTab === 'profile' && <ProfileSettings user={user} setUser={setUser} />}
                     {activeTab === 'notifications' && <NotificationSettings />}
-                    {activeTab === 'teams' && <TeamSettings user={user} />}
-                    {activeTab === 'danger' && <DangerZone user={user} logout={logout} />}
+                    {activeTab === 'teams' && <TeamSettings user={user} setConfirmDialog={setConfirmDialog} />}
+                    {activeTab === 'danger' && <DangerZone user={user} logout={logout} setConfirmDialog={setConfirmDialog} />}
                 </div>
             </div>
         </div>
@@ -321,7 +332,7 @@ const Switch = ({ checked, onChange }) => (
     </button>
 );
 
-const TeamSettings = ({ user }) => {
+const TeamSettings = ({ user, setConfirmDialog }) => {
     const [teams, setTeams] = useState([]);
     const [loading, setLoading] = useState(true);
     const [transferModal, setTransferModal] = useState(null); // teamId
@@ -349,44 +360,60 @@ const TeamSettings = ({ user }) => {
     };
 
     const handleTransfer = async (teamId, newOwnerId) => {
-        if (!confirm("Are you sure? You will lose ownership of this team.")) return;
-        try {
-            const res = await fetch(`/api/teams/${teamId}/transfer`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${localStorage.getItem('token')}`
-                },
-                body: JSON.stringify({ newOwnerId })
-            });
-            if (res.ok) {
-                alert("Ownership transferred.");
-                setTransferModal(null);
-                fetchTeams();
-            } else {
-                const data = await res.json();
-                alert(data.error);
+        setConfirmDialog({
+            isOpen: true,
+            title: "Transfer Ownership",
+            message: "Are you sure? You will lose ownership of this team.",
+            isDestructive: true,
+            onConfirm: async () => {
+                setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+                try {
+                    const res = await fetch(`/api/teams/${teamId}/transfer`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: `Bearer ${localStorage.getItem('token')}`
+                        },
+                        body: JSON.stringify({ newOwnerId })
+                    });
+                    if (res.ok) {
+                        toast.success("Ownership transferred.");
+                        setTransferModal(null);
+                        fetchTeams();
+                    } else {
+                        const data = await res.json();
+                        toast.error(data.error);
+                    }
+                } catch (e) {
+                    toast.error("Transfer failed");
+                }
             }
-        } catch (e) {
-            alert("Transfer failed");
-        }
+        });
     };
 
     const handleDeleteTeam = async (teamId) => {
-        if (!confirm("Are you sure? This will delete the team and ALL its projects permanently.")) return;
-        try {
-             const res = await fetch(`/api/teams/${teamId}`, {
-                method: 'DELETE',
-                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-            });
-            if (res.ok) {
-                fetchTeams();
-            } else {
-                alert("Failed to delete team");
+        setConfirmDialog({
+            isOpen: true,
+            title: "Delete Team",
+            message: "Are you sure? This will delete the team and ALL its projects permanently.",
+            isDestructive: true,
+            onConfirm: async () => {
+                setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+                try {
+                    const res = await fetch(`/api/teams/${teamId}`, {
+                        method: 'DELETE',
+                        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                    });
+                    if (res.ok) {
+                        fetchTeams();
+                    } else {
+                        toast.error("Failed to delete team");
+                    }
+                } catch (e) {
+                    toast.error("Error deleting team");
+                }
             }
-        } catch (e) {
-            alert("Error deleting team");
-        }
+        });
     };
 
     if (loading) return <div>Loading...</div>;

@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Clock } from 'lucide-react';
 import { useHeader } from '../context/HeaderContext';
+import { useAuth } from '../context/AuthContext';
+import ConfirmDialog from '../components/ConfirmDialog';
 import ProjectListToolbar from '../components/ProjectListToolbar';
 import ProjectCard from '../components/ProjectCard';
 import ProjectEmptyState from '../components/ProjectEmptyState';
@@ -12,6 +14,7 @@ const RecentActivity = () => {
     const [projects, setProjects] = useState([]);
     const [loading, setLoading] = useState(true);
     const { setBreadcrumbPath } = useHeader();
+    const { user } = useAuth();
     const [teams, setTeams] = useState([]);
 
     // Toolbar State
@@ -28,14 +31,25 @@ const RecentActivity = () => {
     // Modals
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [editingProject, setEditingProject] = useState(null);
+    const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, title: '', message: '', onConfirm: () => {}, isDestructive: false });
 
     // Persist view mode
     useEffect(() => {
         localStorage.setItem('dashboard_view_mode', viewMode);
     }, [viewMode]);
 
-    // Load saved filters on mount
+    // Load saved filters on mount (User Prefs > LocalStorage)
     useEffect(() => {
+        if (user && user.preferences) {
+            try {
+                const prefs = typeof user.preferences === 'string' ? JSON.parse(user.preferences) : user.preferences;
+                if (prefs.dashboardFilters) {
+                    setFilters(prefs.dashboardFilters);
+                    return;
+                }
+            } catch (e) { console.error(e); }
+        }
+
         const saved = localStorage.getItem('dashboard_filters');
         if (saved) {
             try {
@@ -44,7 +58,7 @@ const RecentActivity = () => {
                 console.error("Failed to parse saved filters", e);
             }
         }
-    }, []);
+    }, [user]);
 
     useEffect(() => {
         setBreadcrumbPath(['Dashboard']);
@@ -85,12 +99,18 @@ const RecentActivity = () => {
 
     const handleFilterChange = (newFilters) => {
         setFilters(newFilters);
-        // Optional: Save filters automatically or keep manual save?
-        // Let's assume auto-save for smoother UX if users rely on it,
-        // but the previous code had a manual "Save View".
-        // Let's keep it simple: just update state.
-        // If we want persistence:
-        // localStorage.setItem('dashboard_filters', JSON.stringify(newFilters));
+        // Save to user preferences
+        if (user) {
+             fetch('/api/users/me/client-preferences', {
+                  method: 'PATCH',
+                  headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${localStorage.getItem('token')}`
+                  },
+                  body: JSON.stringify({ dashboardFilters: newFilters })
+             }).catch(console.error);
+        }
+        localStorage.setItem('dashboard_filters', JSON.stringify(newFilters));
     };
 
     const handleStatusUpdate = async (project, status) => {
@@ -113,19 +133,26 @@ const RecentActivity = () => {
     };
 
     const handleDelete = async (project) => {
-        if (window.confirm(`Are you sure you want to delete "${project.name}"?`)) {
-            try {
-                const res = await fetch(`/api/projects/${project.id}`, {
-                    method: 'DELETE',
-                    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-                });
-                if (res.ok) {
-                    setProjects(projects.filter(p => p.id !== project.id));
+        setConfirmDialog({
+            isOpen: true,
+            title: "Delete Project",
+            message: `Are you sure you want to delete "${project.name}"?`,
+            isDestructive: true,
+            onConfirm: async () => {
+                setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+                try {
+                    const res = await fetch(`/api/projects/${project.id}`, {
+                        method: 'DELETE',
+                        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                    });
+                    if (res.ok) {
+                        setProjects(projects.filter(p => p.id !== project.id));
+                    }
+                } catch (err) {
+                    console.error(err);
                 }
-            } catch (err) {
-                console.error(err);
             }
-        }
+        });
     };
 
     // Filter & Sort Logic
@@ -214,6 +241,15 @@ const RecentActivity = () => {
                     </div>
                 )}
             </div>
+
+            <ConfirmDialog
+                isOpen={confirmDialog.isOpen}
+                title={confirmDialog.title}
+                message={confirmDialog.message}
+                onConfirm={confirmDialog.onConfirm}
+                onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+                isDestructive={confirmDialog.isDestructive}
+            />
 
             {showCreateModal && (
                 <CreateProjectModal

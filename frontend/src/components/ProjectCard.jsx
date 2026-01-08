@@ -68,7 +68,7 @@ const ProjectCard = ({
             <div className="group flex items-center gap-4 p-3 bg-card border border-border rounded-lg hover:border-primary/50 hover:shadow-md transition-all relative">
                 {isUnread && <div className="w-2 h-2 bg-red-500 rounded-full absolute top-2 right-2 border border-background z-20" title="New activity"></div>}
 
-                <Link to={`/project/${project.id}`} className="absolute inset-0 z-0" onClick={handleLinkClick}>
+                <Link to={project.team && project.team.slug && project.slug ? `/${project.team.slug}/project/${project.slug}` : `/project/${project.id}`} className="absolute inset-0 z-0" onClick={handleLinkClick}>
                     <span className="sr-only">View {project.name}</span>
                 </Link>
 
@@ -145,7 +145,7 @@ const ProjectCard = ({
                 </div>
             )}
 
-            <Link to={`/project/${project.id}`} className="absolute inset-0 z-10 rounded-xl" onClick={handleLinkClick}>
+            <Link to={project.team && project.team.slug && project.slug ? `/${project.team.slug}/project/${project.slug}` : `/project/${project.id}`} className="absolute inset-0 z-10 rounded-xl" onClick={handleLinkClick}>
                 <span className="sr-only">View project {project.name}</span>
             </Link>
 

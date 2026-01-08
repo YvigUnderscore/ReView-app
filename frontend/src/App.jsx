@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation, useOutletContext } from 'react-router-dom';
+import { AnimatePresence, motion } from 'framer-motion';
 import Layout from './components/Layout';
 import VideoPlayer from './components/VideoPlayer';
 import ImageViewer from './components/ImageViewer';
@@ -14,12 +15,13 @@ import AdminDashboard from './pages/Admin/AdminDashboard';
 import TeamDashboard from './pages/Team/TeamDashboard';
 import RecentActivity from './pages/RecentActivity';
 import ProjectLibrary from './pages/ProjectLibrary';
+import Trash from './pages/Trash';
 import SettingsPage from './pages/SettingsPage';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { HeaderProvider, useHeader } from './context/HeaderContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { BrandingProvider } from './context/BrandingContext';
-import { NotificationProvider } from './context/NotificationContext';
+import { NotificationProvider, useNotification } from './context/NotificationContext';
 import PrivateRoute from './components/PrivateRoute';
 import { useParams } from 'react-router-dom';
 import CreateProjectModal from './components/CreateProjectModal';
@@ -29,12 +31,26 @@ import VideoControls from './components/VideoControls';
 import CommentsPopup from './pages/CommentsPopup';
 import ShortcutsModal from './components/ShortcutsModal';
 import MobileGuard, { useMobileDetection } from './components/MobileGuard';
-import { Pencil, Upload, Edit3, Check, X as XIcon, Share2, ChevronDown, SplitSquareHorizontal, Image as ImageIcon, ChevronLeft, ChevronRight, MoreVertical } from 'lucide-react';
-import { Toaster } from 'sonner';
+import { Pencil, Upload, Edit3, Check, X as XIcon, Share2, ChevronDown, SplitSquareHorizontal, Image as ImageIcon, ChevronLeft, ChevronRight, MoreVertical, MessageSquare } from 'lucide-react';
+import { Toaster, toast } from 'sonner';
+
+const PageTransition = ({ children }) => {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -10 }}
+      transition={{ duration: 0.3, ease: "easeInOut" }}
+      className="w-full h-full"
+    >
+      {children}
+    </motion.div>
+  );
+};
 
 // Project View Component (Stateful Wrapper)
 const ProjectView = () => {
-  const { id } = useParams();
+  const { id, teamSlug, projectSlug } = useParams();
   const { setBreadcrumbPath } = useHeader();
 
   // Context from Layout for Sidebar Control
@@ -50,6 +66,7 @@ const ProjectView = () => {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const { socket } = useNotification();
   const [volume, setVolume] = useState(() => {
     const saved = localStorage.getItem('pref_volume');
     return saved !== null ? parseFloat(saved) : 1;
@@ -91,9 +108,72 @@ const ProjectView = () => {
   // Panel State
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [panelWidth, setPanelWidth] = useState(400); // Default 400px
+  const [mobileVideoHeight, setMobileVideoHeight] = useState('40%'); // Default 40% height for video in mobile portrait
 
   // Mobile check for maximization
   const { isMobile, isLandscape } = useMobileDetection();
+
+  const isResizing = useRef(false);
+  const currentResizeWidth = useRef(400); // Track width during resize
+
+  // Resize Handlers
+  const startResize = (e) => {
+      isResizing.current = true;
+      currentResizeWidth.current = panelWidth; // Sync start
+      e.preventDefault();
+      document.addEventListener('mousemove', handleResize);
+      document.addEventListener('mouseup', stopResize);
+      document.addEventListener('touchmove', handleResize);
+      document.addEventListener('touchend', stopResize);
+  };
+
+  const handleResize = (e) => {
+      if (!isResizing.current) return;
+
+      // Handle Mouse or Touch Event
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+      if (isMobile && !isLandscape) {
+          // Mobile Portrait: Vertical Resize
+      } else {
+          // Desktop/Landscape: Horizontal Resize
+          const newWidth = window.innerWidth - clientX;
+          currentResizeWidth.current = newWidth;
+
+          // Allow dragging freely for visual feedback, snap happens on release
+          if (newWidth > 200 && newWidth < 800) {
+              setPanelWidth(newWidth);
+              if (isPanelCollapsed) setIsPanelCollapsed(false);
+          } else if (newWidth <= 200) {
+               // Visual collapse hint?
+          }
+      }
+  };
+
+  const stopResize = () => {
+      isResizing.current = false;
+      document.removeEventListener('mousemove', handleResize);
+      document.removeEventListener('mouseup', stopResize);
+      document.removeEventListener('touchmove', handleResize);
+      document.removeEventListener('touchend', stopResize);
+
+      // Snap Logic (Desktop only)
+      if (!isMobile || isLandscape) {
+          const w = currentResizeWidth.current;
+
+          if (w < 350) {
+              setIsPanelCollapsed(true);
+              setPanelWidth(400); // Reset to default for next open
+          } else if (w >= 390 && w <= 410) {
+              setPanelWidth(400); // Snap to 400
+          } else {
+             // Keep current width
+             setPanelWidth(w);
+          }
+      }
+  };
 
   const controlsTimeoutRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -178,7 +258,17 @@ const ProjectView = () => {
   };
 
   const fetchProject = () => {
-      fetch(`/api/projects/${id}`, {
+      let url = `/api/projects/${id}`;
+      if (teamSlug && projectSlug) {
+          url = `/api/projects/slug/${teamSlug}/${projectSlug}`;
+      } else if (id) {
+          url = `/api/projects/${id}`;
+      } else {
+          // No ID or Slug?
+          return;
+      }
+
+      fetch(url, {
           headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       })
       .then(res => {
@@ -209,7 +299,42 @@ const ProjectView = () => {
 
   useEffect(() => {
     fetchProject();
-  }, [id, location.search]);
+  }, [id, teamSlug, projectSlug, location.search]);
+
+  // Join Project Room & Listen
+  useEffect(() => {
+      if (!socket || !project) return;
+
+      socket.emit('join_project', project.id);
+
+      const handleComment = (data) => {
+           if (data.projectId === project.id) {
+               fetchProject();
+           }
+      };
+
+      const handleVersionAdded = (data) => {
+          if (data.projectId === project.id) {
+               fetchProject();
+          }
+      };
+
+      const handleProjectUpdate = (data) => {
+           if (data.id === project.id) {
+               setProject(prev => ({ ...prev, ...data }));
+           }
+      };
+
+      socket.on('COMMENT_ADDED', handleComment);
+      socket.on('VERSION_ADDED', handleVersionAdded);
+      socket.on('PROJECT_UPDATE', handleProjectUpdate);
+
+      return () => {
+          socket.off('COMMENT_ADDED', handleComment);
+          socket.off('VERSION_ADDED', handleVersionAdded);
+          socket.off('PROJECT_UPDATE', handleProjectUpdate);
+      };
+  }, [socket, project?.id]);
 
   // Loop Selection Logic
   useEffect(() => {
@@ -292,7 +417,7 @@ const ProjectView = () => {
     }
   }, [project, activeVersionIndex, setBreadcrumbPath]);
 
-  // Handle version upload (same as before)
+  // Handle version upload
   const handleVersionUpload = async (e) => {
       const file = fileInputRef.current?.files[0];
       const images = imageInputRef.current?.files;
@@ -319,11 +444,11 @@ const ProjectView = () => {
          if (res.ok) {
              fetchProject();
          } else {
-             alert("Failed to upload version");
+             toast.error("Failed to upload version");
          }
       } catch(err) {
           console.error(err);
-          alert("Error uploading version");
+          toast.error("Error uploading version");
       } finally {
           setUploadingVersion(false);
           if (fileInputRef.current) fileInputRef.current.value = '';
@@ -335,7 +460,7 @@ const ProjectView = () => {
       if (!tempVersionName.trim()) return;
       const version = project.versions[activeVersionIndex];
       if (version.type !== 'video') {
-          alert("Renaming image collections is not supported yet.");
+          toast.error("Renaming image collections is not supported yet.");
           setIsRenamingVersion(false);
           return;
       }
@@ -387,14 +512,11 @@ const ProjectView = () => {
       if (!project.clientToken) return;
       const link = `${window.location.origin}/review/${project.clientToken}`;
       navigator.clipboard.writeText(link);
-      alert("Client review link copied to clipboard!");
+      toast.success("Client review link copied to clipboard!");
   };
 
   const handlePopout = () => {
       window.open(`/project/${id}/comments-popup`, 'comments-popup', 'width=450,height=700');
-      // We can also collapse the local panel automatically if desired, but user might want both?
-      // User said "masquer OU mettre sur fenêtre externe".
-      // Let's collapse it to save space.
       setIsPanelCollapsed(true);
   };
 
@@ -424,18 +546,6 @@ const ProjectView = () => {
       <MobileGuard />
       <ShortcutsModal isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
 
-      {/* Mobile Landscape Sidebar Toggle (Left) - Disabled per requirements */}
-      {/* {isMobile && isLandscape && (
-          <button
-            onClick={() => setMobileSidebarDocked && setMobileSidebarDocked(!mobileSidebarDocked)}
-            className={`fixed left-0 top-1/2 -translate-y-1/2 z-50 p-2 bg-black/50 text-white rounded-r-lg border-y border-r border-white/20 hover:bg-black/70 transition-transform ${mobileSidebarDocked ? 'translate-x-[64px]' : ''}`}
-            title="Toggle Sidebar"
-          >
-             {mobileSidebarDocked ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
-          </button>
-      )} */}
-
-      {/* Mobile Landscape Comments Toggle (Right) */}
       {isMobile && isLandscape && (
           <button
             onClick={() => setMobileRightPanelDocked(!mobileRightPanelDocked)}
@@ -447,7 +557,8 @@ const ProjectView = () => {
       )}
 
       <div
-        className={`${isMobile && !isLandscape ? (showMobileComments ? 'h-[40%]' : 'flex-1') : 'flex-1'} flex flex-col min-w-0 bg-black relative min-h-0 transition-all duration-300`}
+        className={`${isMobile && !isLandscape ? (showMobileComments ? '' : 'flex-1') : 'flex-1'} flex flex-col min-w-0 bg-black relative min-h-0 transition-all duration-300`}
+        style={isMobile && !isLandscape && showMobileComments ? { height: mobileVideoHeight } : {}}
         onMouseMove={handleMouseMove}
         onMouseLeave={() => isPlaying && setShowControls(false)}
       >
@@ -688,7 +799,7 @@ const ProjectView = () => {
                         className="bg-black/50 text-white hover:bg-black/70 p-1.5 rounded border border-white/20"
                         title="Show Comments"
                      >
-                         <ChevronLeft size={16} />
+                         <MessageSquare size={16} />
                      </button>
                  )}
              </div>
@@ -821,13 +932,41 @@ const ProjectView = () => {
          )}
       </div>
 
+      {/* Resize Handle */}
+      {!isPanelCollapsed && (
+        <>
+            {/* Desktop/Landscape Vertical Handle */}
+            {(!isMobile || (isMobile && isLandscape && mobileRightPanelDocked)) && (
+                <div
+                    className="w-1 cursor-col-resize hover:bg-primary/50 bg-transparent transition-colors z-10 hidden md:block"
+                    onMouseDown={startResize}
+                    onTouchStart={startResize}
+                />
+            )}
+
+            {/* Mobile Portrait Horizontal Handle */}
+            {(isMobile && !isLandscape && showMobileComments) && (
+                 <div
+                    className="h-1.5 w-full cursor-row-resize bg-border flex items-center justify-center"
+                    onMouseDown={startResize}
+                    onTouchStart={startResize}
+                 >
+                     <div className="w-10 h-1 bg-muted-foreground/30 rounded-full" />
+                 </div>
+            )}
+        </>
+      )}
+
       {/* Activity Panel Container */}
-      <div className={`
-          ${(!isMobile || (isMobile && isLandscape && mobileRightPanelDocked)) ? 'md:relative relative block h-full border-l border-border z-0' : 'relative block w-full bg-background flex flex-col transition-all duration-300'}
-          ${(isMobile && !isLandscape) ? (showMobileComments ? 'flex-1' : 'h-0 overflow-hidden') : ''}
-          ${isPanelCollapsed ? 'w-0 overflow-hidden' : 'w-80'}
-          ${(isMobile && isLandscape && !mobileRightPanelDocked) ? 'hidden' : ''}
-      `}>
+      <div
+          className={`
+            ${(!isMobile || (isMobile && isLandscape && mobileRightPanelDocked)) ? 'md:relative relative block h-full border-l border-border z-0 transition-[width] duration-300 ease-in-out' : 'relative block w-full bg-background flex flex-col transition-all duration-300'}
+            ${(isMobile && !isLandscape) ? (showMobileComments ? 'flex-1' : 'h-0 overflow-hidden') : ''}
+            ${isPanelCollapsed ? 'w-0 overflow-hidden' : ''}
+            ${(isMobile && isLandscape && !mobileRightPanelDocked) ? 'hidden' : ''}
+          `}
+          style={(!isMobile || (isMobile && isLandscape && mobileRightPanelDocked)) && !isPanelCollapsed ? { width: panelWidth } : {}}
+      >
           {!isPanelCollapsed && (
               <ActivityPanel
                  projectId={project.id}
@@ -920,6 +1059,35 @@ const ProjectView = () => {
 
                      setProject({ ...project, versions: updatedVersions });
                  }}
+                 onCommentDeleted={(commentId) => {
+                     // Need to reload or update state locally. Reload is easier but local state is better.
+                     // Local state update:
+                     const deleteFromTree = (comments) => {
+                         const index = comments.findIndex(c => c.id === commentId);
+                         if (index !== -1) {
+                             comments.splice(index, 1);
+                             return true;
+                         }
+                         for (let c of comments) {
+                             if (c.replies && deleteFromTree(c.replies)) return true;
+                         }
+                         return false;
+                     };
+
+                     const updatedVersions = [...project.versions];
+                     let currentCommentsList;
+
+                     if (isVideo) {
+                        currentCommentsList = updatedVersions[activeVersionIndex].comments;
+                     } else if (isImageBundle) {
+                        currentCommentsList = updatedVersions[activeVersionIndex].images[currentImageIndex].comments;
+                     } else if (isThreeD) {
+                         currentCommentsList = updatedVersions[activeVersionIndex].comments;
+                     }
+
+                     deleteFromTree(currentCommentsList);
+                     setProject({ ...project, versions: updatedVersions });
+                 }}
                  onCommentUpdated={(updatedComment) => {
                      const updatedVersions = project.versions.map((version, vIdx) => {
                          if (vIdx !== activeVersionIndex) return version;
@@ -975,6 +1143,7 @@ const ProjectView = () => {
 // ... AppRoutes and App component ...
 const AppRoutes = () => {
   const { user, setupRequired, loading, error, securityIssue } = useAuth();
+  const location = useLocation();
 
   if (loading) {
      return <div className="h-screen w-full flex items-center justify-center bg-black text-white">Loading...</div>;
@@ -1013,31 +1182,95 @@ const AppRoutes = () => {
               {securityIssue}
           </div>
       )}
-      <Routes>
-      {/* Public Routes */}
-      <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <LandingPage />} />
-      <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <Login />} />
-      <Route path="/register" element={user ? <Navigate to="/dashboard" replace /> : <Register />} />
-      <Route path="/review/:token" element={<ClientReview />} />
+      <AnimatePresence mode="wait">
+        <Routes location={location} key={location.pathname}>
+          {/* Public Routes */}
+          <Route path="/" element={
+            <PageTransition>
+               {user ? <Navigate to="/dashboard" replace /> : <LandingPage />}
+            </PageTransition>
+          } />
+          <Route path="/login" element={
+            <PageTransition>
+               {user ? <Navigate to="/dashboard" replace /> : <Login />}
+            </PageTransition>
+          } />
+          <Route path="/register" element={
+            <PageTransition>
+               {user ? <Navigate to="/dashboard" replace /> : <Register />}
+            </PageTransition>
+          } />
+          <Route path="/review/:token" element={
+             <PageTransition>
+               <ClientReview />
+             </PageTransition>
+          } />
 
-      {/* Fallback for setup */}
-      <Route path="/setup" element={<Navigate to="/" replace />} />
+          {/* Fallback for setup */}
+          <Route path="/setup" element={<Navigate to="/" replace />} />
 
-      {/* Protected Routes */}
-      <Route element={<PrivateRoute />}>
-        <Route element={<Layout />}>
-          <Route path="/dashboard" element={<RecentActivity />} />
-          <Route path="/projects" element={<ProjectLibrary />} />
-          <Route path="/project/:id" element={<ProjectView />} />
-          <Route path="/project/:id/comments-popup" element={<CommentsPopup />} />
-          <Route path="/admin" element={<AdminDashboard />} />
-          <Route path="/team" element={<TeamDashboard />} />
-          <Route path="/settings" element={<SettingsPage />} />
-        </Route>
-      </Route>
+          {/* Protected Routes */}
+          <Route element={<PrivateRoute />}>
+            <Route element={<Layout />}>
+              <Route path="/dashboard" element={
+                 <PageTransition>
+                    <RecentActivity />
+                 </PageTransition>
+              } />
+              <Route path="/projects" element={
+                 <PageTransition>
+                    <ProjectLibrary />
+                 </PageTransition>
+              } />
 
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+              {/* Legacy ID Route */}
+              <Route path="/project/:id" element={
+                 <PageTransition>
+                   <ProjectView />
+                 </PageTransition>
+              } />
+              {/* New Slug Route */}
+              <Route path="/:teamSlug/project/:projectSlug" element={
+                 <PageTransition>
+                   <ProjectView />
+                 </PageTransition>
+              } />
+
+              <Route path="/project/:id/comments-popup" element={<CommentsPopup />} />
+              <Route path="/admin" element={
+                 <PageTransition>
+                    <AdminDashboard />
+                 </PageTransition>
+              } />
+
+              <Route path="/team" element={
+                 <PageTransition>
+                   <TeamDashboard />
+                 </PageTransition>
+              } />
+              {/* New Team Route */}
+              <Route path="/:teamSlug" element={
+                 <PageTransition>
+                   <TeamDashboard />
+                 </PageTransition>
+              } />
+
+              <Route path="/trash" element={
+                 <PageTransition>
+                   <Trash />
+                 </PageTransition>
+              } />
+              <Route path="/settings" element={
+                 <PageTransition>
+                   <SettingsPage />
+                 </PageTransition>
+              } />
+            </Route>
+          </Route>
+
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AnimatePresence>
     </>
   );
 };

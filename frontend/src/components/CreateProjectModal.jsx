@@ -127,6 +127,16 @@ const CreateProjectModal = ({ onClose, onProjectCreated, initialFile }) => {
 
       toast.success('Project created successfully!');
       onProjectCreated(res.data);
+
+      // Auto-navigation handled by parent via onProjectCreated usually,
+      // but to ensure slug usage we might need to know if parent navigates.
+      // Usually Sidebar just refreshes list.
+      // We should navigate here or ensure onProjectCreated uses slug.
+      // But onProjectCreated implementation in Sidebar/RecentActivity might just refetch.
+      // If we want to navigate to the new project immediately:
+      // Note: We don't have navigate from hook here, need to import it or rely on parent.
+      // Let's assume onProjectCreated handles it or we modify this file to navigate.
+
       onClose();
     } catch (err) {
       const msg = err.response?.data?.error || err.message || 'An error occurred. Please try again.';

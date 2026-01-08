@@ -11,10 +11,19 @@ export const NotificationProvider = ({ children }) => {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [socket, setSocket] = useState(null);
+  const [soundUrl, setSoundUrl] = useState(null);
 
   // Initialize Socket and Fetch Initial Notifications
   useEffect(() => {
     if (!user) return;
+
+    // Fetch Config for Sound
+    fetch('/api/system/config')
+        .then(res => res.json())
+        .then(data => {
+            if(data.notificationSoundUrl) setSoundUrl(data.notificationSoundUrl);
+        })
+        .catch(() => {});
 
     // Fetch initial state
     fetch('/api/notifications', {
@@ -74,6 +83,22 @@ export const NotificationProvider = ({ children }) => {
     newSocket.on('notification', (newNotification) => {
       setNotifications(prev => [newNotification, ...prev]);
       setUnreadCount(prev => prev + 1);
+
+      // Play Sound
+      if (soundUrl) {
+          try {
+              // Ensure path is absolute or correct relative to public
+              const path = soundUrl.startsWith('http') || soundUrl.startsWith('/') ? soundUrl : `/api/media/system/${soundUrl}`;
+              const audio = new Audio(path);
+              audio.volume = 0.5;
+              const playPromise = audio.play();
+              if (playPromise !== undefined) {
+                  playPromise.catch(e => console.error("Error playing notification sound:", e));
+              }
+          } catch(e) {
+              console.error("Audio error", e);
+          }
+      }
     });
 
     setSocket(newSocket);
@@ -137,7 +162,8 @@ export const NotificationProvider = ({ children }) => {
         markAsRead,
         markAllAsRead,
         deleteNotification,
-        deleteAll
+        deleteAll,
+        socket // Expose socket for other components (like ProjectLibrary)
     }}>
       {children}
     </NotificationContext.Provider>

@@ -14,11 +14,30 @@ const inviteLimiter = rateLimit({
     message: { error: 'Too many invites created, please try again later.' }
 });
 
-// POST /invites: Create new invite (Admin only)
-router.post('/', authenticateToken, requireAdmin, inviteLimiter, async (req, res) => {
+// POST /invites: Create new invite
+// Authenticated users can invite if they are Admin OR own a Team.
+router.post('/', authenticateToken, inviteLimiter, async (req, res) => {
   const { email, role } = req.body;
 
   try {
+    // Permission Check
+    if (req.user.role !== 'admin') {
+       // Check if user owns at least one team
+       const user = await prisma.user.findUnique({
+           where: { id: req.user.id },
+           include: { ownedTeams: { select: { id: true } } }
+       });
+
+       if (!user || user.ownedTeams.length === 0) {
+           return res.status(403).json({ error: 'Only admins or team owners can create invites.' });
+       }
+
+       // Force role to 'user' if not admin
+       if (role && role !== 'user') {
+           return res.status(403).json({ error: 'Only admins can invite users with special roles.' });
+       }
+    }
+
     const token = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 

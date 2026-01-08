@@ -3,24 +3,41 @@ import { useAuth } from '../../context/AuthContext';
 import { useHeader } from '../../context/HeaderContext';
 import { useBranding } from '../../context/BrandingContext';
 import { useNavigate } from 'react-router-dom';
-import { Edit, X } from 'lucide-react';
+import { Edit, X, Users, Database, Shield, Activity, RefreshCw } from 'lucide-react';
+import clsx from 'clsx';
+import io from 'socket.io-client';
+import ConfirmDialog from '../../components/ConfirmDialog';
+import { toast } from 'sonner';
 
 const AdminDashboard = () => {
   const { user } = useAuth();
   const { searchQuery } = useHeader();
   const { title: currentTitle, dateFormat: currentDateFormat, refreshConfig } = useBranding();
   const navigate = useNavigate();
+
+  // Tab State
+  const [activeTab, setActiveTab] = useState('settings'); // 'settings', 'users', 'teams'
+
+  // Confirmation Dialog
+  const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, title: '', message: '', onConfirm: () => {}, isDestructive: false });
+
+  // Data State
   const [users, setUsers] = useState([]);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteLink, setInviteLink] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [editingUser, setEditingUser] = useState(null);
+  const [teams, setTeams] = useState([]);
 
   // Settings State
   const [siteTitle, setSiteTitle] = useState('');
   const [dateFormat, setDateFormat] = useState('DD/MM/YYYY');
+  const [retentionDays, setRetentionDays] = useState('7');
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [uploadingIcon, setUploadingIcon] = useState(false);
+  const [uploadingSound, setUploadingSound] = useState(false);
+  const [globalUserLimit, setGlobalUserLimit] = useState(10); // GB
+  const [globalTeamLimit, setGlobalTeamLimit] = useState(25); // GB
+  const [recalcLoading, setRecalcLoading] = useState(false);
+
+  // System Stats State
+  const [systemStats, setSystemStats] = useState(null);
 
   // SMTP State
   const [smtpConfig, setSmtpConfig] = useState({
@@ -29,10 +46,139 @@ const AdminDashboard = () => {
   const [smtpLoading, setSmtpLoading] = useState(false);
   const [testEmailLoading, setTestEmailLoading] = useState(false);
 
+  // Invitation State
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteLink, setInviteLink] = useState('');
+  const [inviteLoading, setInviteLoading] = useState(false);
+
+  // Edit Modals State
+  const [editingUser, setEditingUser] = useState(null);
+  const [editingTeam, setEditingTeam] = useState(null);
+
+  // Announcement State
+  const [announcement, setAnnouncement] = useState({ subject: '', message: '' });
+  const [announcementLoading, setAnnouncementLoading] = useState(false);
+
   const SMTP_PRESETS = {
       ovh: { host: 'ssl0.ovh.net', port: '465', secure: true },
       gmail: { host: 'smtp.gmail.com', port: '465', secure: true },
       outlook: { host: 'smtp.office365.com', port: '587', secure: false }
+  };
+
+  useEffect(() => {
+    if (user && user.role !== 'admin') {
+      navigate('/');
+      return;
+    }
+    fetchSettings();
+    if (activeTab === 'users') fetchUsers();
+    if (activeTab === 'teams') fetchTeams();
+
+    // Socket Connection for System Stats
+    if (activeTab === 'settings') {
+        const socketUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+             ? `http://${window.location.hostname}:3000`
+             : window.location.origin;
+
+        const socket = io(socketUrl, {
+            query: { token: localStorage.getItem('token') },
+            transports: ['websocket', 'polling']
+        });
+
+        socket.emit('join_room', 'admin_stats');
+
+        socket.on('SYSTEM_STATS', (stats) => {
+             setSystemStats(stats);
+        });
+
+        return () => socket.disconnect();
+    }
+  }, [user, currentTitle, currentDateFormat, activeTab]);
+
+  const fetchSettings = () => {
+      setSiteTitle(currentTitle);
+      setDateFormat(currentDateFormat || 'DD/MM/YYYY');
+
+      // Fetch Retention
+      fetch('/api/admin/settings/retention', {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      })
+      .then(res => res.json())
+      .then(data => setRetentionDays(data.retentionDays))
+      .catch(e => console.error(e));
+
+      // Fetch SMTP
+      fetch('/api/admin/settings/smtp', {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      })
+      .then(res => res.json())
+      .then(data => setSmtpConfig(data))
+      .catch(e => console.error(e));
+
+      fetch('/api/admin/settings/storage', {
+           headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      })
+      .then(res => {
+          if(res.ok) return res.json();
+          return { userLimit: 10 * 1024 * 1024 * 1024, teamLimit: 25 * 1024 * 1024 * 1024 }; // Default fallback
+      })
+      .then(data => {
+          setGlobalUserLimit(Math.round(Number(data.userLimit) / (1024 * 1024 * 1024)));
+          setGlobalTeamLimit(Math.round(Number(data.teamLimit) / (1024 * 1024 * 1024)));
+      })
+      .catch(() => {});
+  };
+
+  const fetchUsers = () => {
+    fetch('/api/admin/users', {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+    })
+      .then(res => res.json())
+      .then(data => setUsers(data));
+  };
+
+  const fetchTeams = () => {
+    fetch('/api/admin/teams', {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+    })
+      .then(res => res.json())
+      .then(data => setTeams(data));
+  };
+
+  const handleUpdateSettings = async (e) => {
+      e.preventDefault();
+      setSettingsLoading(true);
+      try {
+          // Update Basic Settings
+          await fetch('/api/admin/settings', {
+              method: 'PATCH',
+              headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${localStorage.getItem('token')}`
+              },
+              body: JSON.stringify({ title: siteTitle, dateFormat, retentionDays })
+          });
+
+          // Update Storage Settings (Bytes)
+          await fetch('/api/admin/settings/storage', {
+              method: 'PATCH',
+              headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${localStorage.getItem('token')}`
+              },
+              body: JSON.stringify({
+                  userLimit: globalUserLimit * 1024 * 1024 * 1024,
+                  teamLimit: globalTeamLimit * 1024 * 1024 * 1024
+              })
+          });
+
+          toast.success("Settings updated");
+          refreshConfig();
+      } catch (e) {
+          toast.error("Failed to update settings");
+      } finally {
+          setSettingsLoading(false);
+      }
   };
 
   const handlePresetChange = (e) => {
@@ -47,30 +193,6 @@ const AdminDashboard = () => {
       }
   };
 
-  // Announcement State
-  const [announcement, setAnnouncement] = useState({ subject: '', message: '' });
-  const [announcementLoading, setAnnouncementLoading] = useState(false);
-
-  useEffect(() => {
-    if (user && user.role !== 'admin') {
-      navigate('/');
-      return;
-    }
-    fetchUsers();
-    fetchSmtp();
-    setSiteTitle(currentTitle);
-    setDateFormat(currentDateFormat || 'DD/MM/YYYY');
-  }, [user, currentTitle, currentDateFormat]);
-
-  const fetchSmtp = () => {
-      fetch('/api/admin/settings/smtp', {
-          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      })
-      .then(res => res.json())
-      .then(data => setSmtpConfig(data))
-      .catch(e => console.error(e));
-  };
-
   const handleUpdateSmtp = async (e) => {
       e.preventDefault();
       setSmtpLoading(true);
@@ -83,10 +205,10 @@ const AdminDashboard = () => {
               },
               body: JSON.stringify(smtpConfig)
           });
-          if (res.ok) alert("SMTP Settings updated");
-          else alert("Failed to update SMTP settings");
+          if (res.ok) toast.success("SMTP Settings updated");
+          else toast.error("Failed to update SMTP settings");
       } catch (e) {
-          alert("Error updating settings");
+          toast.error("Error updating settings");
       } finally {
           setSmtpLoading(false);
       }
@@ -97,140 +219,14 @@ const AdminDashboard = () => {
       try {
           const res = await fetch('/api/admin/mail/test', {
               method: 'POST',
-              headers: {
-                  'Content-Type': 'application/json',
-                  Authorization: `Bearer ${localStorage.getItem('token')}`
-              },
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
               body: JSON.stringify({ email: user.email })
           });
           const data = await res.json();
-          if (res.ok) alert(data.message);
-          else alert("Failed to send test email: " + (data.error || 'Unknown error'));
-      } catch (e) {
-          alert("Error sending test email");
-      } finally {
-          setTestEmailLoading(false);
-      }
-  };
-
-  const handleSendAnnouncement = async (e) => {
-      e.preventDefault();
-      if (!window.confirm("Are you sure you want to send this email to ALL users?")) return;
-
-      setAnnouncementLoading(true);
-      try {
-          const res = await fetch('/api/admin/mail/broadcast', {
-              method: 'POST',
-              headers: {
-                  'Content-Type': 'application/json',
-                  Authorization: `Bearer ${localStorage.getItem('token')}`
-              },
-              body: JSON.stringify(announcement)
-          });
-          const data = await res.json();
-          if (res.ok) {
-              alert(`Announcement sent! Success: ${data.stats.sent}, Failed: ${data.stats.failed}`);
-              setAnnouncement({ subject: '', message: '' });
-          } else {
-              alert("Failed to send announcement: " + (data.error || 'Unknown error'));
-          }
-      } catch (e) {
-          alert("Error sending announcement");
-      } finally {
-          setAnnouncementLoading(false);
-      }
-  };
-
-  const fetchUsers = () => {
-    fetch('/api/admin/users', {
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-    })
-      .then(res => res.json())
-      .then(data => setUsers(data));
-  };
-
-  const handleDeleteUser = (id) => {
-    if (!window.confirm('Are you sure you want to delete this user?')) return;
-    fetch(`/api/admin/users/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-    })
-      .then(res => {
-        if (res.ok) fetchUsers();
-        else alert('Failed to delete user');
-      });
-  };
-
-  const handleUpdateUser = async (e) => {
-      e.preventDefault();
-      const { id, name, email, role, password } = editingUser;
-
-      try {
-          const res = await fetch(`/api/admin/users/${id}`, {
-              method: 'PATCH',
-              headers: {
-                  'Content-Type': 'application/json',
-                  Authorization: `Bearer ${localStorage.getItem('token')}`
-              },
-              body: JSON.stringify({ name, email, role, password: password || undefined })
-          });
-
-          if (res.ok) {
-              setEditingUser(null);
-              fetchUsers();
-          } else {
-              const data = await res.json();
-              alert(data.error || 'Failed to update user');
-          }
-      } catch (err) {
-          alert('Error updating user');
-      }
-  };
-
-  const handleGenerateInvite = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      const res = await fetch('/api/invites', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({ email: inviteEmail || undefined })
-      });
-      const data = await res.json();
-      // Assume frontend is on the same host, construct URL
-      const link = `${window.location.origin}/register?token=${data.token}`;
-      setInviteLink(link);
-    } catch (err) {
-      alert('Failed to generate invite');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleUpdateSettings = async (e) => {
-      e.preventDefault();
-      setSettingsLoading(true);
-      try {
-          const res = await fetch('/api/admin/settings', {
-              method: 'PATCH',
-              headers: {
-                  'Content-Type': 'application/json',
-                  Authorization: `Bearer ${localStorage.getItem('token')}`
-              },
-              body: JSON.stringify({ title: siteTitle, dateFormat })
-          });
-          if (res.ok) {
-              alert("Settings updated");
-              refreshConfig();
-          }
-      } catch (e) {
-          alert("Failed to update settings");
-      } finally {
-          setSettingsLoading(false);
-      }
+          if (res.ok) toast.success(data.message);
+          else toast.error("Failed to send test email: " + (data.error || 'Unknown error'));
+      } catch (e) { toast.error("Error sending test email"); }
+      finally { setTestEmailLoading(false); }
   };
 
   const handleIconUpload = async (e) => {
@@ -239,271 +235,508 @@ const AdminDashboard = () => {
           setUploadingIcon(true);
           const formData = new FormData();
           formData.append('icon', file);
-
           try {
               const res = await fetch('/api/admin/settings/icon', {
                   method: 'POST',
                   headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
                   body: formData
               });
-              if (res.ok) {
-                  alert("Icon updated");
-                  refreshConfig();
-              }
-          } catch (e) {
-              alert("Failed to upload icon");
-          } finally {
-              setUploadingIcon(false);
-          }
+              if (res.ok) { toast.success("Icon updated"); refreshConfig(); }
+          } catch (e) { toast.error("Failed to upload icon"); }
+          finally { setUploadingIcon(false); }
       }
   };
 
-  const filteredUsers = users.filter(u =>
-      (u.name && u.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (u.email && u.email.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  const handleSoundUpload = async (e) => {
+      if (e.target.files && e.target.files[0]) {
+          const file = e.target.files[0];
+          setUploadingSound(true);
+          const formData = new FormData();
+          formData.append('sound', file);
+          try {
+              const res = await fetch('/api/admin/settings/sound', {
+                  method: 'POST',
+                  headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+                  body: formData
+              });
+              if (res.ok) { toast.success("Sound updated"); refreshConfig(); }
+              else toast.error("Failed to upload sound");
+          } catch (e) { toast.error("Failed to upload sound"); }
+          finally { setUploadingSound(false); }
+      }
+  };
+
+  const handleRecalculateStorage = async () => {
+      setConfirmDialog({
+            isOpen: true,
+            title: "Recalculate Storage",
+            message: "This will recalculate storage usage for all users and teams. It may take some time.",
+            onConfirm: async () => {
+                setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+                setRecalcLoading(true);
+                try {
+                    const res = await fetch('/api/admin/storage/recalculate', {
+                        method: 'POST',
+                        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                    });
+                    if (res.ok) {
+                        toast.success("Storage recalculation started.");
+                        if(activeTab === 'users') fetchUsers();
+                        if(activeTab === 'teams') fetchTeams();
+                    } else {
+                        toast.error("Failed to start recalculation");
+                    }
+                } catch (e) {
+                    toast.error("Error starting recalculation");
+                } finally {
+                    setRecalcLoading(false);
+                }
+            }
+      });
+  };
+
+  const handleGenerateInvite = async (e) => {
+    e.preventDefault();
+    setInviteLoading(true);
+    try {
+      const res = await fetch('/api/invites', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+        body: JSON.stringify({ email: inviteEmail || undefined })
+      });
+      const data = await res.json();
+      const link = `${window.location.origin}/register?token=${data.token}`;
+      setInviteLink(link);
+    } catch (err) { toast.error('Failed to generate invite'); }
+    finally { setInviteLoading(false); }
+  };
+
+  const handleSendAnnouncement = async (e) => {
+      e.preventDefault();
+      setConfirmDialog({
+          isOpen: true,
+          title: "Send Announcement",
+          message: "Are you sure you want to send this email to ALL users?",
+          onConfirm: async () => {
+              setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+              setAnnouncementLoading(true);
+              try {
+                  const res = await fetch('/api/admin/mail/broadcast', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+                      body: JSON.stringify(announcement)
+                  });
+                  const data = await res.json();
+                  if (res.ok) {
+                      toast.success(`Announcement sent! Success: ${data.stats.sent}, Failed: ${data.stats.failed}`);
+                      setAnnouncement({ subject: '', message: '' });
+                  } else { toast.error("Failed to send announcement"); }
+              } catch (e) { toast.error("Error sending announcement"); }
+              finally { setAnnouncementLoading(false); }
+          }
+      });
+  };
+
+  // User Management Handlers
+  const handleDeleteUser = (id) => {
+    setConfirmDialog({
+        isOpen: true,
+        title: "Delete User",
+        message: "Are you sure you want to delete this user?",
+        isDestructive: true,
+        onConfirm: () => {
+            setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+            fetch(`/api/admin/users/${id}`, {
+              method: 'DELETE',
+              headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+            }).then(res => { if (res.ok) fetchUsers(); else toast.error('Failed to delete user'); });
+        }
+    });
+  };
+
+  const handleUpdateUser = async (e) => {
+      e.preventDefault();
+      const { id, name, email, role, password, storageLimitGB } = editingUser;
+
+      const storageLimit = (storageLimitGB === '' || storageLimitGB === null) ? null : BigInt(storageLimitGB * 1024 * 1024 * 1024).toString();
+
+      try {
+          const res = await fetch(`/api/admin/users/${id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+              body: JSON.stringify({ name, email, role, password: password || undefined, storageLimit })
+          });
+          if (res.ok) { setEditingUser(null); fetchUsers(); }
+          else { const data = await res.json(); toast.error(data.error || 'Failed to update user'); }
+      } catch (err) { toast.error('Error updating user'); }
+  };
+
+  // Team Management Handlers
+  const handleUpdateTeam = async (e) => {
+      e.preventDefault();
+      const { id, storageLimitGB } = editingTeam;
+       const storageLimit = (storageLimitGB === '' || storageLimitGB === null) ? null : BigInt(storageLimitGB * 1024 * 1024 * 1024).toString();
+
+      try {
+           const res = await fetch(`/api/admin/teams/${id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+              body: JSON.stringify({ storageLimit })
+          });
+          if (res.ok) { setEditingTeam(null); fetchTeams(); }
+          else { const data = await res.json(); toast.error(data.error || 'Failed to update team'); }
+      } catch(err) { toast.error('Error updating team'); }
+  };
+
+  // Utilities
+  const formatBytes = (bytes) => {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
-      <h1 className="text-3xl font-bold mb-8">Admin Dashboard</h1>
+    <div className="p-4 md:p-8 max-w-7xl mx-auto">
+            <ConfirmDialog
+                isOpen={confirmDialog.isOpen}
+                title={confirmDialog.title}
+                message={confirmDialog.message}
+                onConfirm={confirmDialog.onConfirm}
+                onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+                isDestructive={confirmDialog.isDestructive}
+            />
+      <h1 className="text-3xl font-bold mb-6">Admin Dashboard</h1>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* System Settings */}
-        <div className="bg-card border border-border rounded-lg p-6 lg:col-span-2">
-            <h2 className="text-xl font-semibold mb-4">System Settings</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {/* Tabs */}
+      <div className="flex border-b border-border mb-8 overflow-x-auto">
+          <button
+              onClick={() => setActiveTab('settings')}
+              className={clsx("px-6 py-3 font-medium text-sm transition-colors border-b-2 whitespace-nowrap", activeTab === 'settings' ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}
+          >
+              System Settings
+          </button>
+          <button
+              onClick={() => setActiveTab('users')}
+              className={clsx("px-6 py-3 font-medium text-sm transition-colors border-b-2 whitespace-nowrap", activeTab === 'users' ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}
+          >
+              Users & Quotas
+          </button>
+          <button
+              onClick={() => setActiveTab('teams')}
+              className={clsx("px-6 py-3 font-medium text-sm transition-colors border-b-2 whitespace-nowrap", activeTab === 'teams' ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}
+          >
+              Teams & Quotas
+          </button>
+      </div>
+
+      {/* Settings Tab */}
+      {activeTab === 'settings' && (
+         <div className="space-y-6 animate-in fade-in duration-300">
+            <div className="lg:col-span-2 bg-card border border-border rounded-lg p-6">
+                <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+                    <Activity size={20} /> System Health (Live)
+                </h2>
+                {systemStats ? (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="p-4 bg-muted/30 rounded border border-border">
+                            <div className="text-sm font-medium text-muted-foreground mb-2">CPU Load</div>
+                            <div className="text-2xl font-bold">{systemStats.cpu}%</div>
+                            <div className="h-2 w-full bg-muted mt-2 rounded-full overflow-hidden">
+                                <div className="h-full bg-blue-500 transition-all duration-500" style={{ width: `${systemStats.cpu}%` }} />
+                            </div>
+                        </div>
+                        <div className="p-4 bg-muted/30 rounded border border-border">
+                            <div className="text-sm font-medium text-muted-foreground mb-2">RAM Usage</div>
+                            <div className="text-2xl font-bold">{systemStats.ram}%</div>
+                            <div className="text-xs text-muted-foreground">{systemStats.ramUsed} / {systemStats.ramTotal}</div>
+                            <div className="h-2 w-full bg-muted mt-2 rounded-full overflow-hidden">
+                                <div className="h-full bg-purple-500 transition-all duration-500" style={{ width: `${systemStats.ram}%` }} />
+                            </div>
+                        </div>
+                        <div className="p-4 bg-muted/30 rounded border border-border">
+                            <div className="text-sm font-medium text-muted-foreground mb-2">Global Storage (App)</div>
+                            <div className="text-2xl font-bold">{systemStats.storage}</div>
+                            <div className="text-xs text-muted-foreground">Total Quota Consumed</div>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="text-muted-foreground text-center py-4">Connecting to system stats...</div>
+                )}
+            </div>
+
+            {/* General Settings */}
+            <div className="bg-card border border-border rounded-lg p-6">
+                <h2 className="text-xl font-semibold mb-4">General Configuration</h2>
                 <form onSubmit={handleUpdateSettings} className="space-y-4">
                     <div>
                         <label className="block text-sm font-medium mb-1">Site Title</label>
-                        <div className="flex gap-2">
-                            <input
-                                type="text"
-                                className="flex-1 bg-background border border-border rounded p-2"
-                                value={siteTitle}
-                                onChange={e => setSiteTitle(e.target.value)}
-                            />
+                        <input type="text" className="w-full bg-background border border-border rounded p-2" value={siteTitle} onChange={e => setSiteTitle(e.target.value)} />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Date Format</label>
+                        <select className="w-full bg-background border border-border rounded p-2" value={dateFormat} onChange={e => setDateFormat(e.target.value)}>
+                            <option value="DD/MM/YYYY">DD/MM/YYYY (31/12/2023)</option>
+                            <option value="MM/DD/YYYY">MM/DD/YYYY (12/31/2023)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Trash Retention (Days)</label>
+                        <input type="number" min="0" className="w-full bg-background border border-border rounded p-2" value={retentionDays} onChange={e => setRetentionDays(e.target.value)} />
+                    </div>
+
+                    <div className="pt-4 border-t border-border mt-4">
+                        <h3 className="text-md font-semibold mb-2 flex items-center justify-between">
+                            Global Storage Defaults
                             <button
-                                type="submit"
-                                disabled={settingsLoading}
-                                className="bg-primary text-primary-foreground px-4 py-2 rounded font-medium hover:bg-primary/90"
+                                type="button"
+                                onClick={handleRecalculateStorage}
+                                disabled={recalcLoading}
+                                className="text-xs bg-muted hover:bg-muted/80 px-2 py-1 rounded flex items-center gap-1 font-normal"
+                                title="Recalculate storage usage for all users"
                             >
-                                Save
+                                <RefreshCw size={12} className={recalcLoading ? "animate-spin" : ""} />
+                                Recalculate Usage
                             </button>
+                        </h3>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium mb-1">User Limit (GB)</label>
+                                <input type="number" min="0" className="w-full bg-background border border-border rounded p-2" value={globalUserLimit} onChange={e => setGlobalUserLimit(e.target.value)} />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium mb-1">Team Limit (GB)</label>
+                                <input type="number" min="0" className="w-full bg-background border border-border rounded p-2" value={globalTeamLimit} onChange={e => setGlobalTeamLimit(e.target.value)} />
+                            </div>
                         </div>
                     </div>
 
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Date Format</label>
-                        <select
-                            className="w-full bg-background border border-border rounded p-2"
-                            value={dateFormat}
-                            onChange={e => setDateFormat(e.target.value)}
-                        >
-                            <option value="DD/MM/YYYY">DD/MM/YYYY (e.g., 31/12/2023)</option>
-                            <option value="MM/DD/YYYY">MM/DD/YYYY (e.g., 12/31/2023)</option>
-                        </select>
+                    <div className="pt-2">
+                        <button type="submit" disabled={settingsLoading} className="bg-primary text-primary-foreground px-4 py-2 rounded font-medium hover:bg-primary/90 w-full md:w-auto">
+                            {settingsLoading ? 'Saving...' : 'Save System Settings'}
+                        </button>
                     </div>
                 </form>
 
-                <div className="space-y-4">
-                     <label className="block text-sm font-medium mb-1">Site Icon (Favicon)</label>
-                     <div className="flex items-center gap-4">
-                         <div className="relative">
-                             <input
-                                 type="file"
-                                 onChange={handleIconUpload}
-                                 className="hidden"
-                                 id="icon-upload"
-                                 accept="image/*"
-                             />
-                             <label
-                                 htmlFor="icon-upload"
-                                 className="cursor-pointer bg-muted hover:bg-muted/80 text-foreground px-4 py-2 rounded border border-border flex items-center gap-2"
-                             >
-                                 {uploadingIcon ? 'Uploading...' : 'Upload New Icon'}
-                             </label>
+                <div className="mt-6 pt-6 border-t border-border space-y-4">
+                     <div>
+                         <label className="block text-sm font-medium mb-2">Site Icon (Favicon)</label>
+                         <div className="flex items-center gap-4">
+                             <div className="relative">
+                                 <input type="file" onChange={handleIconUpload} className="hidden" id="icon-upload" accept="image/*" />
+                                 <label htmlFor="icon-upload" className="cursor-pointer bg-muted hover:bg-muted/80 text-foreground px-4 py-2 rounded border border-border flex items-center gap-2 text-sm">
+                                     {uploadingIcon ? 'Uploading...' : 'Upload New Icon'}
+                                 </label>
+                             </div>
                          </div>
                      </div>
-                     <p className="text-xs text-muted-foreground">Recommended: 32x32 or 64x64 PNG.</p>
+
+                     <div>
+                         <label className="block text-sm font-medium mb-2">Notification Sound (MP3)</label>
+                         <div className="flex items-center gap-4">
+                             <div className="relative">
+                                 <input type="file" onChange={handleSoundUpload} className="hidden" id="sound-upload" accept="audio/mpeg, audio/mp3" />
+                                 <label htmlFor="sound-upload" className="cursor-pointer bg-muted hover:bg-muted/80 text-foreground px-4 py-2 rounded border border-border flex items-center gap-2 text-sm">
+                                     {uploadingSound ? 'Uploading...' : 'Upload MP3 Sound'}
+                                 </label>
+                             </div>
+                         </div>
+                     </div>
+                </div>
+            </div>
+
+            {/* SMTP Settings */}
+            <div className="bg-card border border-border rounded-lg p-6">
+                <h2 className="text-xl font-semibold mb-4">Email Configuration</h2>
+                <form onSubmit={handleUpdateSmtp} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="md:col-span-2">
+                        <label className="block text-sm font-medium mb-1">Load Preset</label>
+                        <select className="w-full bg-input border border-border rounded p-2" onChange={handlePresetChange} defaultValue="">
+                            <option value="">Select a provider...</option>
+                            <option value="ovh">OVH</option>
+                            <option value="gmail">Gmail</option>
+                            <option value="outlook">Outlook</option>
+                        </select>
+                    </div>
+                    {['host', 'port', 'user', 'pass', 'from'].map(field => (
+                        <div key={field} className={field === 'from' ? "md:col-span-2" : ""}>
+                            <label className="block text-sm font-medium mb-1 capitalize">{field === 'pass' ? 'Password' : field}</label>
+                            <input
+                                type={field === 'pass' ? 'password' : (field === 'port' ? 'number' : 'text')}
+                                className="w-full bg-input border border-border rounded p-2"
+                                value={smtpConfig[`smtp_${field}`]}
+                                onChange={e => setSmtpConfig({...smtpConfig, [`smtp_${field}`]: e.target.value})}
+                            />
+                        </div>
+                    ))}
+                    <div className="md:col-span-2 flex items-center gap-2 pt-2">
+                        <input type="checkbox" id="smtp_secure" checked={smtpConfig.smtp_secure === 'true'} onChange={e => setSmtpConfig({...smtpConfig, smtp_secure: e.target.checked ? 'true' : 'false'})} />
+                        <label htmlFor="smtp_secure" className="text-sm">Secure (SSL/TLS)</label>
+                    </div>
+                    <div className="md:col-span-2 pt-2 flex gap-4">
+                        <button type="submit" disabled={smtpLoading} className="bg-primary text-primary-foreground px-4 py-2 rounded font-medium hover:bg-primary/90">Save</button>
+                        <button type="button" onClick={handleTestEmail} disabled={testEmailLoading} className="bg-secondary text-secondary-foreground px-4 py-2 rounded font-medium border border-border">Test Email</button>
+                    </div>
+                </form>
+            </div>
+
+            {/* Announcements & Invites Side-by-Side on large screens */}
+             <div className="bg-card border border-border rounded-lg p-6 lg:col-span-2">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                     {/* Invite Generator */}
+                    <div>
+                        <h2 className="text-xl font-semibold mb-4">Generate Invite</h2>
+                        <form onSubmit={handleGenerateInvite} className="space-y-4">
+                            <input type="email" className="w-full bg-background border border-border rounded p-2" placeholder="user@example.com (Optional)" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} />
+                            <button type="submit" disabled={inviteLoading} className="w-full bg-primary text-primary-foreground py-2 rounded font-medium hover:bg-primary/90">
+                                {inviteLoading ? 'Generating...' : 'Generate Link'}
+                            </button>
+                        </form>
+                        {inviteLink && (
+                            <div className="mt-4 p-4 bg-muted/50 rounded border border-border">
+                                <div className="text-xs text-muted-foreground mb-1">Invite Link (Expires in 7 days):</div>
+                                <div className="font-mono text-sm break-all select-all bg-background p-2 rounded border border-border">{inviteLink}</div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Announcement */}
+                    <div>
+                         <h2 className="text-xl font-semibold mb-4">Broadcast Message</h2>
+                         <form onSubmit={handleSendAnnouncement} className="space-y-4">
+                            <input type="text" className="w-full bg-input border border-border rounded p-2" value={announcement.subject} onChange={e => setAnnouncement({...announcement, subject: e.target.value})} placeholder="Subject" required />
+                            <textarea className="w-full bg-input border border-border rounded p-2 h-24" value={announcement.message} onChange={e => setAnnouncement({...announcement, message: e.target.value})} placeholder="Message..." required />
+                            <button type="submit" disabled={announcementLoading} className="bg-primary text-primary-foreground px-4 py-2 rounded font-medium w-full">Send to All</button>
+                         </form>
+                    </div>
                 </div>
             </div>
         </div>
+      )}
 
-        {/* SMTP Settings */}
-        <div className="bg-card border border-border rounded-lg p-6 lg:col-span-2">
-            <h2 className="text-xl font-semibold mb-4">Email Configuration (SMTP)</h2>
-            <form onSubmit={handleUpdateSmtp} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="md:col-span-2">
-                    <label className="block text-sm font-medium mb-1">Load Preset</label>
-                    <select
-                        className="w-full bg-input border border-border rounded p-2"
-                        onChange={handlePresetChange}
-                        defaultValue=""
-                    >
-                        <option value="">Select a provider...</option>
-                        <option value="ovh">OVH</option>
-                        <option value="gmail">Gmail</option>
-                        <option value="outlook">Outlook / Office 365</option>
-                    </select>
-                </div>
-                <div>
-                    <label className="block text-sm font-medium mb-1">Host</label>
-                    <input type="text" className="w-full bg-input border border-border rounded p-2"
-                        value={smtpConfig.smtp_host} onChange={e => setSmtpConfig({...smtpConfig, smtp_host: e.target.value})} />
-                </div>
-                <div>
-                    <label className="block text-sm font-medium mb-1">Port</label>
-                    <input type="number" className="w-full bg-input border border-border rounded p-2"
-                        value={smtpConfig.smtp_port} onChange={e => setSmtpConfig({...smtpConfig, smtp_port: e.target.value})} />
-                </div>
-                <div>
-                    <label className="block text-sm font-medium mb-1">User</label>
-                    <input type="text" className="w-full bg-input border border-border rounded p-2"
-                        value={smtpConfig.smtp_user} onChange={e => setSmtpConfig({...smtpConfig, smtp_user: e.target.value})} />
-                </div>
-                <div>
-                    <label className="block text-sm font-medium mb-1">Password</label>
-                    <input type="password" className="w-full bg-input border border-border rounded p-2"
-                        value={smtpConfig.smtp_pass} onChange={e => setSmtpConfig({...smtpConfig, smtp_pass: e.target.value})} />
-                </div>
-                <div>
-                    <label className="block text-sm font-medium mb-1">From Address</label>
-                    <input type="text" className="w-full bg-input border border-border rounded p-2" placeholder='"My App" <noreply@myapp.com>'
-                        value={smtpConfig.smtp_from} onChange={e => setSmtpConfig({...smtpConfig, smtp_from: e.target.value})} />
-                </div>
-                <div className="flex items-center gap-2 pt-6">
-                    <input type="checkbox" id="smtp_secure"
-                        checked={smtpConfig.smtp_secure === 'true'}
-                        onChange={e => setSmtpConfig({...smtpConfig, smtp_secure: e.target.checked ? 'true' : 'false'})} />
-                    <label htmlFor="smtp_secure" className="text-sm">Secure (SSL/TLS - usually port 465)</label>
-                </div>
-                <div className="md:col-span-2 pt-2 flex gap-4">
-                    <button type="submit" disabled={smtpLoading} className="bg-primary text-primary-foreground px-4 py-2 rounded font-medium hover:bg-primary/90">
-                        {smtpLoading ? 'Saving...' : 'Save SMTP Settings'}
-                    </button>
-                    <button
-                        type="button"
-                        onClick={handleTestEmail}
-                        disabled={testEmailLoading}
-                        className="bg-secondary text-secondary-foreground px-4 py-2 rounded font-medium hover:bg-secondary/80 border border-border"
-                    >
-                        {testEmailLoading ? 'Sending...' : 'Send Test Email'}
-                    </button>
-                </div>
-            </form>
-        </div>
+      {/* Users Tab */}
+      {activeTab === 'users' && (
+          <div className="bg-card border border-border rounded-lg overflow-hidden animate-in fade-in duration-300">
+              <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                      <thead className="bg-muted text-muted-foreground border-b border-border">
+                          <tr>
+                              <th className="p-4 font-medium">User</th>
+                              <th className="p-4 font-medium">Role</th>
+                              <th className="p-4 font-medium">Storage Usage</th>
+                              <th className="p-4 font-medium">Teams</th>
+                              <th className="p-4 font-medium text-right">Actions</th>
+                          </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                          {users.filter(u => u.name.toLowerCase().includes(searchQuery.toLowerCase()) || u.email.toLowerCase().includes(searchQuery.toLowerCase())).map(u => {
+                              const limit = u.storageLimit ? Number(u.storageLimit) : globalUserLimit * 1024 * 1024 * 1024;
+                              const usage = u.storageUsed ? Number(u.storageUsed) : 0;
+                              const percent = Math.min(100, (usage / limit) * 100);
 
-        {/* Announcements */}
-        <div className="bg-card border border-border rounded-lg p-6 lg:col-span-2">
-            <h2 className="text-xl font-semibold mb-4">Send Announcement / Newsletter</h2>
-            <form onSubmit={handleSendAnnouncement} className="space-y-4">
-                <div>
-                    <label className="block text-sm font-medium mb-1">Subject</label>
-                    <input
-                        type="text"
-                        className="w-full bg-input border border-border rounded p-2"
-                        value={announcement.subject}
-                        onChange={e => setAnnouncement({...announcement, subject: e.target.value})}
-                        placeholder="Update Notification..."
-                        required
-                    />
-                </div>
-                <div>
-                    <label className="block text-sm font-medium mb-1">Message</label>
-                    <textarea
-                        className="w-full bg-input border border-border rounded p-2 h-32"
-                        value={announcement.message}
-                        onChange={e => setAnnouncement({...announcement, message: e.target.value})}
-                        placeholder="Write your message here..."
-                        required
-                    />
-                </div>
-                <button
-                    type="submit"
-                    disabled={announcementLoading}
-                    className="bg-primary text-primary-foreground px-4 py-2 rounded font-medium hover:bg-primary/90"
-                >
-                    {announcementLoading ? 'Sending...' : 'Send to All Users'}
-                </button>
-            </form>
-        </div>
-
-        {/* User Management */}
-        <div className="bg-card border border-border rounded-lg p-6">
-          <h2 className="text-xl font-semibold mb-4">Users</h2>
-          <div className="space-y-4">
-            {filteredUsers.length === 0 ? (
-                <div className="text-muted-foreground text-sm">No users found.</div>
-            ) : filteredUsers.map(u => (
-              <div key={u.id} className="flex items-center justify-between p-3 bg-muted/20 rounded border border-border">
-                <div>
-                  <div className="font-medium">{u.name}</div>
-                  <div className="text-sm text-muted-foreground">{u.email}</div>
-                  <div className="text-xs px-2 py-0.5 bg-primary/10 text-primary rounded-full inline-block mt-1 uppercase">{u.role}</div>
-                </div>
-                <div className="flex gap-2">
-                    <button
-                        onClick={() => setEditingUser({ ...u, password: '' })}
-                        className="p-2 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
-                        title="Edit User"
-                    >
-                        <Edit size={16} />
-                    </button>
-                    {u.id !== user.id && (
-                    <button
-                        onClick={() => handleDeleteUser(u.id)}
-                        className="p-2 hover:bg-destructive/10 rounded text-destructive hover:text-destructive/80"
-                        title="Delete User"
-                    >
-                        <X size={16} />
-                    </button>
-                    )}
-                </div>
+                              return (
+                              <tr key={u.id} className="hover:bg-muted/20">
+                                  <td className="p-4">
+                                      <div className="font-medium">{u.name}</div>
+                                      <div className="text-muted-foreground text-xs">{u.email}</div>
+                                  </td>
+                                  <td className="p-4 capitalize">
+                                      <span className={clsx("px-2 py-0.5 rounded-full text-xs font-medium", u.role === 'admin' ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground")}>
+                                          {u.role}
+                                      </span>
+                                  </td>
+                                  <td className="p-4 w-48">
+                                      <div className="text-xs mb-1 flex justify-between">
+                                          <span>{formatBytes(usage)}</span>
+                                          <span className="text-muted-foreground">/ {formatBytes(limit)}</span>
+                                      </div>
+                                      <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                                          <div className="h-full bg-primary" style={{ width: `${percent}%` }} />
+                                      </div>
+                                  </td>
+                                  <td className="p-4 text-xs text-muted-foreground max-w-xs truncate">
+                                      {[...(u.teams || []), ...(u.ownedTeams || [])].map(t => t.name).join(', ') || '-'}
+                                  </td>
+                                  <td className="p-4 text-right">
+                                      <div className="flex justify-end gap-2">
+                                          <button
+                                            onClick={() => setEditingUser({ ...u, password: '', storageLimitGB: u.storageLimit ? Math.round(Number(u.storageLimit) / (1024*1024*1024)) : '' })}
+                                            className="p-2 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
+                                          >
+                                              <Edit size={16} />
+                                          </button>
+                                          {u.id !== user.id && (
+                                              <button onClick={() => handleDeleteUser(u.id)} className="p-2 hover:bg-destructive/10 rounded text-destructive hover:text-destructive/80">
+                                                  <X size={16} />
+                                              </button>
+                                          )}
+                                      </div>
+                                  </td>
+                              </tr>
+                          )})}
+                      </tbody>
+                  </table>
               </div>
-            ))}
           </div>
-        </div>
+      )}
 
-        {/* Invite Generator */}
-        <div className="bg-card border border-border rounded-lg p-6 h-fit">
-          <h2 className="text-xl font-semibold mb-4">Generate Registration Invite</h2>
-          <form onSubmit={handleGenerateInvite} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Email (Optional)</label>
-              <input
-                type="email"
-                className="w-full bg-background border border-border rounded p-2"
-                placeholder="user@example.com"
-                value={inviteEmail}
-                onChange={e => setInviteEmail(e.target.value)}
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-primary text-primary-foreground py-2 rounded font-medium hover:bg-primary/90"
-            >
-              {loading ? 'Generating...' : 'Generate Link'}
-            </button>
-          </form>
+      {/* Teams Tab */}
+      {activeTab === 'teams' && (
+          <div className="bg-card border border-border rounded-lg overflow-hidden animate-in fade-in duration-300">
+              <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                      <thead className="bg-muted text-muted-foreground border-b border-border">
+                          <tr>
+                              <th className="p-4 font-medium">Team Name</th>
+                              <th className="p-4 font-medium">Owner</th>
+                              <th className="p-4 font-medium">Members</th>
+                              <th className="p-4 font-medium">Storage Usage</th>
+                              <th className="p-4 font-medium text-right">Actions</th>
+                          </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                          {teams.map(t => {
+                               const limit = t.storageLimit ? Number(t.storageLimit) : globalTeamLimit * 1024 * 1024 * 1024;
+                               const usage = t.storageUsed ? Number(t.storageUsed) : 0;
+                               const percent = Math.min(100, (usage / limit) * 100);
 
-          {inviteLink && (
-            <div className="mt-4 p-4 bg-muted/50 rounded border border-border">
-              <div className="text-xs text-muted-foreground mb-1">Invite Link:</div>
-              <div className="font-mono text-sm break-all select-all bg-background p-2 rounded border border-border">
-                {inviteLink}
+                              return (
+                              <tr key={t.id} className="hover:bg-muted/20">
+                                  <td className="p-4 font-medium">{t.name}</td>
+                                  <td className="p-4 text-xs">
+                                      {t.owner?.name}
+                                      <div className="text-muted-foreground">{t.owner?.email}</div>
+                                  </td>
+                                  <td className="p-4">{t._count?.members || 0}</td>
+                                  <td className="p-4 w-48">
+                                      <div className="text-xs mb-1 flex justify-between">
+                                          <span>{formatBytes(usage)}</span>
+                                          <span className="text-muted-foreground">/ {formatBytes(limit)}</span>
+                                      </div>
+                                      <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                                          <div className="h-full bg-primary" style={{ width: `${percent}%` }} />
+                                      </div>
+                                  </td>
+                                  <td className="p-4 text-right">
+                                       <button
+                                            onClick={() => setEditingTeam({ ...t, storageLimitGB: t.storageLimit ? Math.round(Number(t.storageLimit) / (1024*1024*1024)) : '' })}
+                                            className="p-2 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
+                                          >
+                                              <Edit size={16} />
+                                       </button>
+                                  </td>
+                              </tr>
+                          )})}
+                      </tbody>
+                  </table>
               </div>
-              <p className="text-xs text-muted-foreground mt-2">
-                Share this link with the user. It expires in 7 days.
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
+          </div>
+      )}
 
       {/* Edit User Modal */}
       {editingUser && (
-          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
               <div className="bg-background rounded-lg shadow-xl w-full max-w-md border border-border">
                   <div className="p-4 border-b border-border flex justify-between items-center">
                       <h3 className="font-bold text-lg">Edit User</h3>
@@ -512,59 +745,56 @@ const AdminDashboard = () => {
                   <form onSubmit={handleUpdateUser} className="p-4 space-y-4">
                       <div>
                           <label className="block text-sm font-medium mb-1">Name</label>
-                          <input
-                              type="text"
-                              className="w-full bg-input border border-border rounded p-2"
-                              value={editingUser.name}
-                              onChange={e => setEditingUser({ ...editingUser, name: e.target.value })}
-                              required
-                          />
+                          <input type="text" className="w-full bg-input border border-border rounded p-2" value={editingUser.name} onChange={e => setEditingUser({ ...editingUser, name: e.target.value })} required />
                       </div>
                       <div>
                           <label className="block text-sm font-medium mb-1">Email</label>
-                          <input
-                              type="email"
-                              className="w-full bg-input border border-border rounded p-2"
-                              value={editingUser.email}
-                              onChange={e => setEditingUser({ ...editingUser, email: e.target.value })}
-                              required
-                          />
+                          <input type="email" className="w-full bg-input border border-border rounded p-2" value={editingUser.email} onChange={e => setEditingUser({ ...editingUser, email: e.target.value })} required />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium mb-1">Role</label>
+                            <select className="w-full bg-input border border-border rounded p-2" value={editingUser.role} onChange={e => setEditingUser({ ...editingUser, role: e.target.value })}>
+                                <option value="user">User</option>
+                                <option value="admin">Admin</option>
+                            </select>
+                        </div>
+                        <div>
+                             <label className="block text-sm font-medium mb-1">Storage Limit (GB)</label>
+                             <input type="number" min="0" className="w-full bg-input border border-border rounded p-2" placeholder={`Default: ${globalUserLimit}`} value={editingUser.storageLimitGB} onChange={e => setEditingUser({ ...editingUser, storageLimitGB: e.target.value })} />
+                             <p className="text-[10px] text-muted-foreground mt-1">Leave blank for default</p>
+                        </div>
                       </div>
                       <div>
-                          <label className="block text-sm font-medium mb-1">Role</label>
-                          <select
-                              className="w-full bg-input border border-border rounded p-2"
-                              value={editingUser.role}
-                              onChange={e => setEditingUser({ ...editingUser, role: e.target.value })}
-                          >
-                              <option value="user">User</option>
-                              <option value="admin">Admin</option>
-                          </select>
-                      </div>
-                      <div>
-                          <label className="block text-sm font-medium mb-1">New Password (Optional)</label>
-                          <input
-                              type="password"
-                              className="w-full bg-input border border-border rounded p-2"
-                              placeholder="Leave blank to keep current"
-                              value={editingUser.password}
-                              onChange={e => setEditingUser({ ...editingUser, password: e.target.value })}
-                          />
+                          <label className="block text-sm font-medium mb-1">New Password</label>
+                          <input type="password" className="w-full bg-input border border-border rounded p-2" placeholder="Leave blank to keep current" value={editingUser.password} onChange={e => setEditingUser({ ...editingUser, password: e.target.value })} />
                       </div>
                       <div className="pt-4 flex justify-end gap-2">
-                          <button
-                              type="button"
-                              onClick={() => setEditingUser(null)}
-                              className="px-4 py-2 rounded hover:bg-muted"
-                          >
-                              Cancel
-                          </button>
-                          <button
-                              type="submit"
-                              className="px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90"
-                          >
-                              Save Changes
-                          </button>
+                          <button type="button" onClick={() => setEditingUser(null)} className="px-4 py-2 rounded hover:bg-muted">Cancel</button>
+                          <button type="submit" className="px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90">Save Changes</button>
+                      </div>
+                  </form>
+              </div>
+          </div>
+      )}
+
+       {/* Edit Team Modal */}
+      {editingTeam && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-background rounded-lg shadow-xl w-full max-w-md border border-border">
+                  <div className="p-4 border-b border-border flex justify-between items-center">
+                      <h3 className="font-bold text-lg">Edit Team: {editingTeam.name}</h3>
+                      <button onClick={() => setEditingTeam(null)}><X size={20} /></button>
+                  </div>
+                  <form onSubmit={handleUpdateTeam} className="p-4 space-y-4">
+                        <div>
+                             <label className="block text-sm font-medium mb-1">Storage Limit (GB)</label>
+                             <input type="number" min="0" className="w-full bg-input border border-border rounded p-2" placeholder={`Default: ${globalTeamLimit}`} value={editingTeam.storageLimitGB} onChange={e => setEditingTeam({ ...editingTeam, storageLimitGB: e.target.value })} />
+                             <p className="text-[10px] text-muted-foreground mt-1">Leave blank for default</p>
+                        </div>
+                      <div className="pt-4 flex justify-end gap-2">
+                          <button type="button" onClick={() => setEditingTeam(null)} className="px-4 py-2 rounded hover:bg-muted">Cancel</button>
+                          <button type="submit" className="px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90">Save Changes</button>
                       </div>
                   </form>
               </div>

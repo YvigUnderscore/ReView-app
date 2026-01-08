@@ -666,7 +666,6 @@ const VideoPlayer = forwardRef(({ src, compareSrc, compareAudioEnabled, onTimeUp
               <ToolButton icon={Pencil} active={tool === 'pencil'} onClick={() => setTool('pencil')} />
               <ToolButton icon={Square} active={tool === 'rect'} onClick={() => setTool('rect')} />
               <ToolButton icon={Circle} active={tool === 'circle'} onClick={() => setTool('circle')} />
-              <ToolButton icon={MessageSquare} active={tool === 'bubble'} onClick={() => setTool('bubble')} />
               <ToolButton icon={MoveRight} active={tool === 'arrow'} onClick={() => setTool('arrow')} />
               <ToolButton icon={CornerUpRight} active={tool === 'curve'} onClick={() => setTool('curve')} />
               <ToolButton icon={Minus} active={tool === 'line'} onClick={() => setTool('line')} />

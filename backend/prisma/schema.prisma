@@ -30,7 +30,17 @@ model User {
   teamRoles TeamRole[] @relation("UserRoles")
   notifications Notification[]
   notificationPreferences NotificationPreference[]
+  preferences String? @default("{}")
   reactions Reaction[]
+  mutedProjects Project[] @relation("MutedProjects")
+
+  storageUsed BigInt @default(0)
+  storageLimit BigInt?
+
+  // Reverse relations for uploader tracking
+  uploadedVideos Video[]
+  uploadedThreeDAssets ThreeDAsset[]
+  uploadedImageBundles ImageBundle[]
 }
 
 model NotificationPreference {
@@ -71,6 +81,7 @@ model Notification {
 model Team {
   id        Int       @id @default(autoincrement())
   name      String
+  slug      String?   @unique
 
   owner     User      @relation("TeamOwner", fields: [ownerId], references: [id])
   ownerId   Int
@@ -81,6 +92,9 @@ model Team {
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+
+  storageUsed BigInt @default(0)
+  storageLimit BigInt?
 }
 
 model Invite {
@@ -96,6 +110,7 @@ model Invite {
 model Project {
   id          Int      @id @default(autoincrement())
   name        String
+  slug        String?
   description String?
   thumbnailPath String?
   hasCustomThumbnail Boolean @default(false)
@@ -111,6 +126,11 @@ model Project {
   teamId      Int?
 
   notifications Notification[]
+  mutedBy     User[]   @relation("MutedProjects")
+
+  deletedAt   DateTime?
+
+  @@unique([teamId, slug])
 }
 
 model Video {
@@ -125,6 +145,10 @@ model Video {
   frameRate    Float     @default(24.0)
   createdAt    DateTime  @default(now())
   comments     Comment[]
+  size         BigInt    @default(0)
+
+  uploaderId   Int?
+  uploader     User?     @relation(fields: [uploaderId], references: [id], onDelete: SetNull)
 }
 
 model ThreeDAsset {
@@ -138,6 +162,10 @@ model ThreeDAsset {
   path         String
   createdAt    DateTime  @default(now())
   comments     Comment[]
+  size         BigInt    @default(0)
+
+  uploaderId   Int?
+  uploader     User?     @relation(fields: [uploaderId], references: [id], onDelete: SetNull)
 }
 
 model ImageBundle {
@@ -147,6 +175,9 @@ model ImageBundle {
   versionName String   @default("V01")
   createdAt   DateTime @default(now())
   images      Image[]
+
+  uploaderId   Int?
+  uploader     User?     @relation(fields: [uploaderId], references: [id], onDelete: SetNull)
 }
 
 model Image {
@@ -159,6 +190,7 @@ model Image {
   mimeType     String
   order        Int
   comments     Comment[]
+  size         BigInt      @default(0)
 }
 
 model Comment {
@@ -178,6 +210,7 @@ model Comment {
   annotation String?  // JSON string for visual annotations
   cameraState String?  // JSON string for 3D camera state (position, target, etc.)
   screenshotPath String? // Path to the screenshot file
+  attachmentPath String? // Path to the user uploaded attachment
   isResolved Boolean  @default(false)
   isVisibleToClient Boolean @default(false)
   createdAt  DateTime @default(now())
@@ -190,6 +223,7 @@ model Comment {
   assignee   User?     @relation("AssignedComments", fields: [assigneeId], references: [id], onDelete: SetNull)
 
   reactions  Reaction[]
+  size       BigInt     @default(0)
 }
 
 model Reaction {

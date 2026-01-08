@@ -10,11 +10,23 @@ const { isValidVideoFile, isValidImageFile, isValidThreeDFile, isValidZipFile, i
 const { generatePDF, generateCSV } = require('./utils/export');
 const { getVideoMetadata } = require('./utils/metadata');
 const { checkProjectAccess, checkCommentAccess } = require('./utils/authCheck');
+const { checkQuota, updateStorage } = require('./utils/storage');
 const ffmpeg = require('fluent-ffmpeg');
 const AdmZip = require('adm-zip');
 const { createAndBroadcast } = require('./services/notificationService');
+const { getIo } = require('./services/socketService');
 
 const router = express.Router();
+
+function slugify(text) {
+  return text
+    .toString()
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^\w\-]+/g, '')
+    .replace(/\-\-+/g, '-');
+}
 const prisma = new PrismaClient();
 
 // Configure Multer
@@ -46,6 +58,11 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
+const commentUpload = multer({
+  storage: storage,
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB
+});
+
 // Helper to calculate next version name
 const getNextVersionName = async (projectId) => {
   const videoCount = await prisma.video.count({ where: { projectId } });
@@ -74,6 +91,50 @@ const getFrameRate = (filePath) => {
     });
   });
 };
+
+// GET /projects/trash: List deleted projects
+router.get('/trash', authenticateToken, async (req, res) => {
+    try {
+        const user = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            include: {
+                teams: { select: { id: true } },
+                ownedTeams: { select: { id: true } }
+            }
+        });
+
+        if (!user) return res.status(401).json({ error: 'User not found' });
+
+        const userTeamIds = [...user.teams.map(t => t.id), ...user.ownedTeams.map(t => t.id)];
+        const uniqueTeamIds = [...new Set(userTeamIds)];
+
+        const where = {
+            deletedAt: { not: null }
+        };
+
+        if (user.role !== 'admin') {
+            where.OR = [
+                { teamId: { in: uniqueTeamIds } },
+                { teamId: null } // Assuming user can't see others' null-team projects unless admin, but schema enforces admin for null team
+            ];
+            // Fix logic: If regular user, they only see projects in their teams.
+            // Admin sees all trash.
+        }
+
+        const projects = await prisma.project.findMany({
+            where: where,
+            include: {
+                 team: { select: { name: true } }
+            },
+            orderBy: { deletedAt: 'desc' }
+        });
+
+        res.json(projects);
+    } catch (error) {
+        console.error('Error fetching trash:', error);
+        res.status(500).json({ error: 'Failed to fetch trash' });
+    }
+});
 
 // GET /projects: List all projects
 router.get('/', authenticateToken, async (req, res) => {
@@ -107,6 +168,9 @@ router.get('/', authenticateToken, async (req, res) => {
         ];
     }
 
+    // Filter out deleted projects
+    where.deletedAt = null;
+
     const projects = await prisma.project.findMany({
       where: where,
       include: {
@@ -136,42 +200,70 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-// GET /projects/:id: Get full project details
-router.get('/:id', authenticateToken, async (req, res) => {
-  try {
-    const projectId = parseInt(req.params.id);
-    if (isNaN(projectId)) return res.status(400).json({ error: 'Invalid project ID' });
+// GET /projects/slug/:teamSlug/:projectSlug: Get full project details by slug
+router.get('/slug/:teamSlug/:projectSlug', authenticateToken, async (req, res) => {
+    try {
+        const { teamSlug, projectSlug } = req.params;
 
-    const user = await prisma.user.findUnique({
-        where: { id: req.user.id },
-        include: { teams: { select: { id: true } }, ownedTeams: { select: { id: true } } }
-    });
+        const user = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            include: { teams: { select: { id: true, slug: true } }, ownedTeams: { select: { id: true, slug: true } } }
+        });
 
-    if (!user) {
-        return res.status(401).json({ error: 'User not found' });
+        if (!user) return res.status(401).json({ error: 'User not found' });
+
+        const userTeams = [...user.teams, ...user.ownedTeams];
+
+        // Find team by slug to verify access
+        const team = await prisma.team.findUnique({ where: { slug: teamSlug } });
+        if (!team) return res.status(404).json({ error: 'Team not found' });
+
+        // Access check
+        const hasAccess = user.role === 'admin' || userTeams.some(t => t.id === team.id);
+        if (!hasAccess) return res.status(403).json({ error: 'Access denied' });
+
+        const basicProject = await prisma.project.findFirst({
+            where: {
+                slug: projectSlug,
+                teamId: team.id
+            },
+            include: { mutedBy: { select: { id: true } } }
+        });
+
+        if (!basicProject) return res.status(404).json({ error: 'Project not found' });
+
+        // Delegate to fetchFullProject logic (reused)
+        const project = await fetchFullProject(basicProject.id, req.user.id, basicProject.teamId);
+        if (!project) return res.status(404).json({ error: 'Project not found' });
+
+        const projectWithVersions = {
+            ...project,
+            // Re-map versions as before
+            versions: [
+                ...project.videos.map(v => ({ ...v, type: 'video' })),
+                ...project.imageBundles.map(b => ({ ...b, type: 'image_bundle' })),
+                ...project.threeDAssets.map(a => ({ ...a, type: 'three_d_asset' }))
+            ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)),
+            isMuted: basicProject.mutedBy.some(u => u.id === req.user.id)
+        };
+
+        res.json(projectWithVersions);
+
+    } catch (error) {
+        console.error('Error fetching project by slug:', error);
+        res.status(500).json({ error: 'Failed to fetch project' });
     }
+});
 
-    const userTeamIds = [...user.teams.map(t => t.id), ...user.ownedTeams.map(t => t.id)];
-
-    // Fetch basic project info first to check access and optimize subsequent query
-    const basicProject = await prisma.project.findUnique({
-      where: { id: projectId },
-      select: { id: true, teamId: true }
-    });
-
-    if (!basicProject) return res.status(404).json({ error: 'Project not found' });
-
-    if (user.role !== 'admin' && (!basicProject.teamId || !userTeamIds.includes(basicProject.teamId))) {
-        return res.status(403).json({ error: 'Access denied' });
-    }
-
+// Reuseable fetch function
+async function fetchFullProject(projectId, userId, teamId) {
     const project = await prisma.project.findUnique({
       where: { id: projectId },
       include: {
         videos: {
           include: {
             comments: {
-              where: { parentId: null }, // Only fetch root comments
+              where: { parentId: null },
               include: {
                 user: {
                   select: {
@@ -179,7 +271,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
                     name: true,
                     role: true,
                     avatarPath: true,
-                    teamRoles: true // Fetch all roles, filter later
+                    teamRoles: true
                   }
                 },
                 reactions: true,
@@ -191,7 +283,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
                         name: true,
                         role: true,
                         avatarPath: true,
-                        teamRoles: true // Fetch all roles, filter later
+                        teamRoles: true
                       }
                     },
                     reactions: true
@@ -216,7 +308,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
                                         name: true,
                                         role: true,
                                         avatarPath: true,
-                                        teamRoles: true // Fetch all roles, filter later
+                                        teamRoles: true
                                     }
                                 },
                                 reactions: true,
@@ -228,7 +320,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
                                                 name: true,
                                                 role: true,
                                                 avatarPath: true,
-                                                teamRoles: true // Fetch all roles, filter later
+                                                teamRoles: true
                                             }
                                         },
                                         reactions: true
@@ -252,7 +344,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
                                 name: true,
                                 role: true,
                                 avatarPath: true,
-                                teamRoles: true // Fetch all roles, filter later
+                                teamRoles: true
                             }
                         },
                         reactions: true,
@@ -264,7 +356,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
                                         name: true,
                                         role: true,
                                         avatarPath: true,
-                                        teamRoles: true // Fetch all roles, filter later
+                                        teamRoles: true
                                     }
                                 },
                                 reactions: true
@@ -282,7 +374,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
                 id: true,
                 name: true,
                 avatarPath: true,
-                teamRoles: true // Fetch all roles, filter later
+                teamRoles: true
               }
             },
             roles: true
@@ -291,57 +383,57 @@ router.get('/:id', authenticateToken, async (req, res) => {
       }
     });
 
+    if (project) {
+        // Filter roles logic (copied from original)
+        const filterRoles = (user) => {
+            if (user && user.teamRoles) {
+                user.teamRoles = user.teamRoles.filter(role => role.teamId === teamId);
+            }
+        };
+        // Apply filter
+        if (project.videos) project.videos.forEach(v => v.comments?.forEach(c => { filterRoles(c.user); c.replies?.forEach(r => filterRoles(r.user)); }));
+        if (project.imageBundles) project.imageBundles.forEach(ib => ib.images?.forEach(img => img.comments?.forEach(c => { filterRoles(c.user); c.replies?.forEach(r => filterRoles(r.user)); })));
+        if (project.threeDAssets) project.threeDAssets.forEach(a => a.comments?.forEach(c => { filterRoles(c.user); c.replies?.forEach(r => filterRoles(r.user)); }));
+        if (project.team?.members) project.team.members.forEach(m => filterRoles(m));
+    }
+
+    return project;
+}
+
+// GET /projects/:id: Get full project details
+router.get('/:id', authenticateToken, async (req, res) => {
+  try {
+    const projectId = parseInt(req.params.id);
+    if (isNaN(projectId)) return res.status(400).json({ error: 'Invalid project ID' });
+
+    const user = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        include: { teams: { select: { id: true } }, ownedTeams: { select: { id: true } } }
+    });
+
+    if (!user) {
+        return res.status(401).json({ error: 'User not found' });
+    }
+
+    const userTeamIds = [...user.teams.map(t => t.id), ...user.ownedTeams.map(t => t.id)];
+
+    // Fetch basic project info first to check access and optimize subsequent query
+    const basicProject = await prisma.project.findUnique({
+      where: { id: projectId },
+      include: {
+          mutedBy: { select: { id: true } }
+      }
+    });
+
+    if (!basicProject) return res.status(404).json({ error: 'Project not found' });
+
+    if (user.role !== 'admin' && (!basicProject.teamId || !userTeamIds.includes(basicProject.teamId))) {
+        return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const project = await fetchFullProject(projectId, req.user.id, basicProject.teamId);
+
     if (!project) return res.status(404).json({ error: 'Project not found' });
-
-    // Filter team roles manually
-    const filterRoles = (user) => {
-        if (user && user.teamRoles) {
-            // Filter roles for the current project's team
-            user.teamRoles = user.teamRoles.filter(role => role.teamId === project.teamId);
-        }
-    };
-
-    // Traverse and filter
-    if (project.videos) {
-        project.videos.forEach(v => {
-            if (v.comments) {
-                v.comments.forEach(c => {
-                    filterRoles(c.user);
-                    if (c.replies) c.replies.forEach(r => filterRoles(r.user));
-                });
-            }
-        });
-    }
-
-    if (project.imageBundles) {
-        project.imageBundles.forEach(ib => {
-            if (ib.images) {
-                ib.images.forEach(img => {
-                    if (img.comments) {
-                        img.comments.forEach(c => {
-                            filterRoles(c.user);
-                            if (c.replies) c.replies.forEach(r => filterRoles(r.user));
-                        });
-                    }
-                });
-            }
-        });
-    }
-
-    if (project.threeDAssets) {
-        project.threeDAssets.forEach(asset => {
-            if (asset.comments) {
-                asset.comments.forEach(c => {
-                    filterRoles(c.user);
-                    if (c.replies) c.replies.forEach(r => filterRoles(r.user));
-                });
-            }
-        });
-    }
-
-    if (project.team && project.team.members) {
-        project.team.members.forEach(member => filterRoles(member));
-    }
 
     // Merge and sort versions
     const allVersions = [
@@ -356,7 +448,8 @@ router.get('/:id', authenticateToken, async (req, res) => {
     // Frontend expects 'videos' array usually. Let's add 'versions' field.
     const projectWithVersions = {
         ...project,
-        versions: allVersions
+        versions: allVersions,
+        isMuted: basicProject.mutedBy.some(u => u.id === req.user.id)
     };
 
     res.json(projectWithVersions);
@@ -371,6 +464,13 @@ router.post('/', authenticateToken, upload.fields([{ name: 'file', maxCount: 1 }
   const videoFile = req.files.file ? req.files.file[0] : null;
   const imageFiles = req.files.images || [];
   const thumbnailFile = req.files.thumbnail ? req.files.thumbnail[0] : null;
+
+  // Calculate total size for quota check
+  let totalSize = 0;
+  if (videoFile) totalSize += videoFile.size;
+  if (imageFiles) imageFiles.forEach(f => totalSize += f.size);
+  // Thumbnails usually small, but let's be strict if we want
+  // if (thumbnailFile) totalSize += thumbnailFile.size;
 
   // Check for 3D file (treated as 'file' but validated as GLB/FBX/USD if extension matches)
   let isThreeD = false;
@@ -443,6 +543,22 @@ router.post('/', authenticateToken, upload.fields([{ name: 'file', maxCount: 1 }
   }
 
   try {
+    const parsedTeamId = teamId ? parseInt(teamId) : null;
+
+    // Check Quota
+    try {
+        await checkQuota({
+            userId: req.user.id,
+            teamId: parsedTeamId,
+            fileSize: totalSize
+        });
+    } catch (e) {
+        if (videoFile) try { fs.unlinkSync(videoFile.path); } catch(err) {}
+        if (thumbnailFile) try { fs.unlinkSync(thumbnailFile.path); } catch(err) {}
+        imageFiles.forEach(f => { try { fs.unlinkSync(f.path); } catch(err) {} });
+        return res.status(403).json({ error: e.message });
+    }
+
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
       include: {
@@ -462,6 +578,40 @@ router.post('/', authenticateToken, upload.fields([{ name: 'file', maxCount: 1 }
     if (user.role !== 'admin') {
         if (!teamId || !userTeamIds.includes(parseInt(teamId))) {
             return res.status(403).json({ error: 'You must be a member of the team to create projects.' });
+        }
+    }
+
+    let baseSlug = slugify(name);
+    if (!baseSlug) baseSlug = `project-${Date.now()}`;
+    let slug = baseSlug;
+    let counter = 1;
+
+    // Uniqueness within team
+    if (parsedTeamId) {
+        while (true) {
+            const existing = await prisma.project.findFirst({
+                where: {
+                    teamId: parsedTeamId,
+                    slug: slug
+                }
+            });
+            if (!existing) break;
+            slug = `${baseSlug}-${counter}`;
+            counter++;
+        }
+    } else {
+        // Admin project (no team)
+        // Ensure uniqueness even for null teamId to prevent confusion
+        while (true) {
+            const existing = await prisma.project.findFirst({
+                where: {
+                    teamId: null,
+                    slug: slug
+                }
+            });
+            if (!existing) break;
+            slug = `${baseSlug}-${counter}`;
+            counter++;
         }
     }
 
@@ -489,14 +639,13 @@ router.post('/', authenticateToken, upload.fields([{ name: 'file', maxCount: 1 }
         thumbnailPath = thumbName;
     }
 
-    const parsedTeamId = teamId ? parseInt(teamId) : null;
-
     let projectData = {
         name: name || 'Untitled Project',
         description: description || '',
         teamId: parsedTeamId,
         thumbnailPath,
         hasCustomThumbnail,
+        slug
     };
 
     if (videoFile) {
@@ -579,7 +728,9 @@ router.post('/', authenticateToken, upload.fields([{ name: 'file', maxCount: 1 }
                     originalName: videoFile.originalname,
                     mimeType: mimeType,
                     path: finalPath, // Absolute path
-                    versionName: 'V01'
+                    versionName: 'V01',
+                    size: BigInt(videoFile.size), // Note: if extracted from ZIP, this might be slightly diff, but using upload size is safer for quota
+                    uploaderId: req.user.id
                 }
             };
         } else {
@@ -591,7 +742,9 @@ router.post('/', authenticateToken, upload.fields([{ name: 'file', maxCount: 1 }
                     mimeType: videoFile.mimetype,
                     path: videoFile.path,
                     versionName: 'V01',
-                    frameRate
+                    frameRate,
+                    size: BigInt(videoFile.size),
+                    uploaderId: req.user.id
                 }
             };
         }
@@ -599,13 +752,15 @@ router.post('/', authenticateToken, upload.fields([{ name: 'file', maxCount: 1 }
         projectData.imageBundles = {
             create: {
                 versionName: 'V01',
+                uploaderId: req.user.id,
                 images: {
                     create: imageFiles.map((file, index) => ({
                         filename: file.filename,
                         originalName: file.originalname,
                         mimeType: file.mimetype,
                         path: file.path,
-                        order: index
+                        order: index,
+                        size: BigInt(file.size)
                     }))
                 }
             }
@@ -616,6 +771,14 @@ router.post('/', authenticateToken, upload.fields([{ name: 'file', maxCount: 1 }
       data: projectData,
       include: { videos: true, imageBundles: { include: { images: true } }, threeDAssets: true }
     });
+
+    // Update Storage Usage
+    // Attribute to Team Storage AND User Storage
+    if (parsedTeamId) {
+        await updateStorage({ teamId: parsedTeamId, deltaBytes: totalSize });
+    }
+    // Update User Storage (Global Limit)
+    await updateStorage({ userId: req.user.id, deltaBytes: totalSize });
 
     // Notification: PROJECT_CREATE
     if (parsedTeamId) {
@@ -631,6 +794,21 @@ router.post('/', authenticateToken, upload.fields([{ name: 'file', maxCount: 1 }
                 if (m.id !== req.user.id) recipients.add(m.id);
             });
         }
+
+        // Send Live Update to Team Members
+        // We iterate and emit to each user's room
+        const io = getIo();
+        recipients.forEach(userId => {
+             io.to(`user_${userId}`).emit('PROJECT_CREATE', project);
+        });
+        // Also emit to myself (the creator) so my list updates if I'm on multiple devices or tabs
+        io.to(`user_${req.user.id}`).emit('PROJECT_CREATE', project);
+
+        // Also emit to the project room (though newly created, no one is there yet, but for consistency)
+        io.to(`project_${project.id}`).emit('PROJECT_CREATE', project);
+
+            // Also emit to the project room (though newly created, no one is there yet, but for consistency)
+            io.to(`project_${project.id}`).emit('PROJECT_CREATE', project);
 
         const videoId = project.videos.length > 0 ? project.videos[0].id : null;
 
@@ -654,6 +832,10 @@ router.post('/', authenticateToken, upload.fields([{ name: 'file', maxCount: 1 }
 router.post('/:id/versions', authenticateToken, upload.fields([{ name: 'file', maxCount: 1 }, { name: 'images', maxCount: 50 }]), async (req, res) => {
     const videoFile = req.files.file ? req.files.file[0] : null;
     const imageFiles = req.files.images || [];
+
+    let totalSize = 0;
+    if (videoFile) totalSize += videoFile.size;
+    if (imageFiles) imageFiles.forEach(f => totalSize += f.size);
 
     // Check for 3D
     let isThreeD = false;
@@ -712,6 +894,18 @@ router.post('/:id/versions', authenticateToken, upload.fields([{ name: 'file', m
         }
         const project = await prisma.project.findUnique({ where: { id: projectId } });
         if (!project) return res.status(404).json({ error: 'Project not found' });
+
+        // Quota Check
+        if (project.teamId) {
+            try {
+                 await checkQuota({ userId: req.user.id, teamId: project.teamId, fileSize: totalSize });
+            } catch (e) {
+                 if (videoFile) try { fs.unlinkSync(videoFile.path); } catch(err) {}
+                 imageFiles.forEach(f => { try { fs.unlinkSync(f.path); } catch(err) {} });
+                 return res.status(403).json({ error: e.message });
+            }
+        }
+
         if (user.role !== 'admin' && project.teamId !== user.teamId) { // NOTE: User model doesn't have teamId, this check looks suspicious in original code, but we keep logic consistent or fix it.
             // Original code: if (user.role !== 'admin' && project.teamId !== user.teamId)
             // But User has many teams. Logic was probably flawed or relying on legacy field.
@@ -836,7 +1030,9 @@ router.post('/:id/versions', authenticateToken, upload.fields([{ name: 'file', m
                         originalName: videoFile.originalname,
                         mimeType: mimeType,
                         path: finalPath,
-                        versionName
+                        versionName,
+                        size: BigInt(videoFile.size),
+                        uploaderId: req.user.id
                     }
                 });
             } else {
@@ -849,7 +1045,9 @@ router.post('/:id/versions', authenticateToken, upload.fields([{ name: 'file', m
                         mimeType: videoFile.mimetype,
                         path: videoFile.path,
                         versionName,
-                        frameRate
+                        frameRate,
+                        size: BigInt(videoFile.size),
+                        uploaderId: req.user.id
                     }
                 });
             }
@@ -858,13 +1056,15 @@ router.post('/:id/versions', authenticateToken, upload.fields([{ name: 'file', m
                 data: {
                     projectId,
                     versionName,
+                    uploaderId: req.user.id,
                     images: {
                         create: imageFiles.map((file, index) => ({
                             filename: file.filename,
                             originalName: file.originalname,
                             mimeType: file.mimetype,
                             path: file.path,
-                            order: index
+                            order: index,
+                            size: BigInt(file.size)
                         }))
                     }
                 },
@@ -876,6 +1076,16 @@ router.post('/:id/versions', authenticateToken, upload.fields([{ name: 'file', m
             where: { id: projectId },
             data: { updatedAt: new Date() }
         });
+
+        // Update Storage (Team + User)
+        if (project.teamId) {
+            await updateStorage({ teamId: project.teamId, deltaBytes: totalSize });
+        }
+        await updateStorage({ userId: req.user.id, deltaBytes: totalSize });
+
+        // Broadcast to Project Room
+        const io = getIo();
+        io.to(`project_${projectId}`).emit('VERSION_ADDED', { projectId, version: newVersion });
 
         // Notification: VIDEO_VERSION (Generalized for version)
         if (project.teamId) {
@@ -910,32 +1120,76 @@ router.post('/:id/versions', authenticateToken, upload.fields([{ name: 'file', m
 });
 
 // POST /projects/:id/comments: Add comment (Video or Image)
-router.post('/:id/comments', authenticateToken, async (req, res) => {
+router.post('/:id/comments', authenticateToken, commentUpload.single('attachment'), async (req, res) => {
   const { content, timestamp, annotation, parentId, duration, assigneeId, videoId, imageId, threeDAssetId, cameraState, screenshot } = req.body;
+  const attachmentFile = req.file;
+
+  // Calculate sizes for quota
+  let totalSize = 0;
+  if (attachmentFile) totalSize += attachmentFile.size;
+  // Screenshot is base64 string, length is approx size in chars (bytes? Base64 is ~1.33x larger than binary)
+  // But we store binary. We will calculate binary size.
+  // We do it below in matches.
 
   // Input Validation
-  if (!isValidText(content, 5000)) return res.status(400).json({ error: 'Comment content exceeds 5000 characters' });
+  if (!isValidText(content, 5000)) {
+      if (attachmentFile) try { fs.unlinkSync(attachmentFile.path); } catch(e) {}
+      return res.status(400).json({ error: 'Comment content exceeds 5000 characters' });
+  }
+
+  // Validate attachment if present
+  let attachmentPath = null;
+  if (attachmentFile) {
+      if (!isValidImageFile(attachmentFile.path)) {
+          try { fs.unlinkSync(attachmentFile.path); } catch(e) {}
+          return res.status(400).json({ error: 'Invalid attachment file format' });
+      }
+      attachmentPath = attachmentFile.filename;
+  }
 
   const projectId = parseInt(req.params.id);
 
   // Security: Check if user has access to the project
   const access = await checkProjectAccess(req.user, projectId);
-  if (!access.authorized) return res.status(access.status).json({ error: access.error });
+  if (!access.authorized) {
+      if (attachmentFile) try { fs.unlinkSync(attachmentFile.path); } catch(e) {}
+      return res.status(access.status).json({ error: access.error });
+  }
 
   try {
     let screenshotPath = null;
+    let screenshotSize = 0;
+
     if (screenshot) {
         const matches = screenshot.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
         if (matches && matches.length === 3) {
             const buffer = Buffer.from(matches[2], 'base64');
+            screenshotSize = buffer.length;
+            totalSize += screenshotSize;
 
             // Security: Validate buffer size (Max 5MB)
             if (buffer.length > 5 * 1024 * 1024) {
+                 if (attachmentFile) try { fs.unlinkSync(attachmentFile.path); } catch(e) {}
                  return res.status(400).json({ error: 'Screenshot too large (max 5MB)' });
+            }
+
+            // Check Quota (User's quota for comments/attachments)
+            if (totalSize > 0) {
+                try {
+                    await checkQuota({
+                        userId: req.user.id,
+                        teamId: null, // Comments count towards USER quota, not Team (as per discussion/plan)
+                        fileSize: totalSize
+                    });
+                } catch(e) {
+                     if (attachmentFile) try { fs.unlinkSync(attachmentFile.path); } catch(err) {}
+                     return res.status(403).json({ error: e.message });
+                }
             }
 
             // Security: Validate image content (Magic numbers)
             if (!isValidImageBuffer(buffer)) {
+                 if (attachmentFile) try { fs.unlinkSync(attachmentFile.path); } catch(e) {}
                  return res.status(400).json({ error: 'Invalid screenshot file format' });
             }
 
@@ -946,18 +1200,54 @@ router.post('/:id/comments', authenticateToken, async (req, res) => {
             fs.writeFileSync(filepath, buffer);
             screenshotPath = filename;
         }
+    } else if (totalSize > 0) {
+        // Check Quota for attachment only (if no screenshot)
+        try {
+            await checkQuota({ userId: req.user.id, teamId: null, fileSize: totalSize });
+        } catch(e) {
+             if (attachmentFile) try { fs.unlinkSync(attachmentFile.path); } catch(err) {}
+             return res.status(403).json({ error: e.message });
+        }
     }
+
+    // Prepare data
+    // Handle JSON stringified fields if coming from FormData (they might be strings already)
+    const parseJSONIfNeeded = (val) => {
+        if (typeof val === 'string') {
+             try {
+                 // Check if it looks like JSON? Or just return it if Prisma expects string?
+                 // Prisma expects String for annotation/cameraState.
+                 // But we want to ensure we store consistent format.
+                 // If the client sends `"[...]"`, it is a string.
+                 // If the client sends a JS object (via JSON body), `req.body` has object.
+                 // `multer` populates `req.body` with strings for text fields.
+                 // So `annotation` will be a string `"[{...}]"`.
+                 // Current code: `annotation ? JSON.stringify(annotation) : null`
+                 // If it is already a string, stringifying it again makes it `"\"[...]\""`.
+                 // We should check type.
+                 if (val.trim().startsWith('[') || val.trim().startsWith('{')) {
+                     return val; // It's already a JSON string
+                 }
+                 return JSON.stringify(val); // It's something else?
+             } catch (e) {
+                 return val;
+             }
+        }
+        return val ? JSON.stringify(val) : null;
+    };
 
     const data = {
         content,
         timestamp: timestamp ? parseFloat(timestamp) : 0,
         duration: duration ? parseFloat(duration) : null,
-        annotation: annotation ? JSON.stringify(annotation) : null,
+        annotation: annotation ? (typeof annotation === 'string' ? annotation : JSON.stringify(annotation)) : null,
         userId: req.user.id,
         parentId: parentId ? parseInt(parentId) : null,
         assigneeId: assigneeId ? parseInt(assigneeId) : null,
-        cameraState: cameraState ? JSON.stringify(cameraState) : null,
-        screenshotPath
+        cameraState: cameraState ? (typeof cameraState === 'string' ? cameraState : JSON.stringify(cameraState)) : null,
+        screenshotPath,
+        attachmentPath,
+        size: BigInt(totalSize)
     };
 
     if (videoId) data.videoId = parseInt(videoId);
@@ -977,7 +1267,57 @@ router.post('/:id/comments', authenticateToken, async (req, res) => {
       }
     });
 
-    const project = await prisma.project.findUnique({ where: { id: projectId } });
+    if (totalSize > 0) {
+        await updateStorage({ userId: req.user.id, teamId: null, deltaBytes: totalSize });
+        // Also update Team storage if we wanted comments to count towards Team, but we stick to User Quota for comments
+    }
+
+    const project = await prisma.project.findUnique({
+        where: { id: projectId },
+        include: { mutedBy: { select: { id: true } } }
+    });
+
+    const mutedUserIds = new Set(project.mutedBy.map(u => u.id));
+
+    // 1. Notify all team members (COMMENT)
+    // Filter out author and muted users
+    if (project && project.teamId) {
+        const team = await prisma.team.findUnique({
+            where: { id: project.teamId },
+            include: { members: { select: { id: true } }, owner: { select: { id: true } } }
+        });
+
+        const recipients = new Set();
+        if (team) {
+            // Add owner
+            recipients.add(team.ownerId);
+            // Add members
+            team.members.forEach(m => recipients.add(m.id));
+        }
+
+        // Live Comment Update (to everyone in team, including muted, excluding author maybe? or include author for sync)
+        // Including author is good for multi-tab.
+        const io = getIo();
+        recipients.forEach(userId => {
+             // Emit full comment object with projectId context
+             io.to(`user_${userId}`).emit('COMMENT_ADDED', { ...comment, projectId });
+        });
+
+        // Also emit to Project Room (for Guests and focused views)
+        io.to(`project_${projectId}`).emit('COMMENT_ADDED', { ...comment, projectId });
+
+        const notifyIds = Array.from(recipients).filter(id => !mutedUserIds.has(id) && id !== req.user.id);
+
+        if (notifyIds.length > 0) {
+            await createAndBroadcast(notifyIds, {
+                type: 'COMMENT',
+                content: `New comment on ${project.name}`,
+                referenceId: comment.id,
+                projectId,
+                videoId: videoId ? parseInt(videoId) : null
+            });
+        }
+    }
 
     // Handle Mentions
     if (project && project.teamId && content && content.includes('@')) {
@@ -1009,7 +1349,11 @@ router.post('/:id/comments', authenticateToken, async (req, res) => {
                 r.users.forEach(u => userIdsToNotify.add(u.id));
             });
 
+            // Remove author
             userIdsToNotify.delete(req.user.id);
+            // Muted users SHOULD still get Mentions (usually high priority), but maybe not general comments?
+            // Standard practice: Mentions override Mute.
+            // So we do NOT filter by mutedUserIds here.
 
             await createAndBroadcast(Array.from(userIdsToNotify), {
                 type: 'MENTION',
@@ -1027,6 +1371,8 @@ router.post('/:id/comments', authenticateToken, async (req, res) => {
         if (parentComment && parentComment.userId && parentComment.userId !== req.user.id) {
             // Check if already notified via mention?
             // The service doesn't check dupes across calls, but distinct types are fine.
+            // Like Mentions, Replies often override mute settings or have their own preference.
+            // We'll keep it sending.
             await createAndBroadcast([parentComment.userId], {
                 type: 'REPLY',
                 content: `New reply to your comment on ${project ? project.name : 'video'}`,
@@ -1349,8 +1695,8 @@ router.patch('/:id', authenticateToken, upload.single('thumbnail'), async (req, 
       data
     });
 
-    // Notification: STATUS_CHANGE
-    if (statusChanged && project.teamId) {
+    // Notification: STATUS_CHANGE & Real-time Update
+    if (project.teamId) { // Check teamId for updates generally
         const team = await prisma.team.findUnique({
             where: { id: project.teamId },
             include: { members: { select: { id: true } }, owner: { select: { id: true } } }
@@ -1358,18 +1704,30 @@ router.patch('/:id', authenticateToken, upload.single('thumbnail'), async (req, 
 
         const recipients = new Set();
         if (team) {
-            if (team.ownerId !== req.user.id) recipients.add(team.ownerId);
-            team.members.forEach(m => {
-                if (m.id !== req.user.id) recipients.add(m.id);
-            });
+            recipients.add(team.ownerId); // Include owner
+            team.members.forEach(m => recipients.add(m.id));
         }
 
-        await createAndBroadcast(Array.from(recipients), {
-            type: 'STATUS_CHANGE',
-            content: `Status changed to ${status} for "${updatedProject.name}"`,
-            referenceId: updatedProject.id, // Using projectId as reference
-            projectId: updatedProject.id
+        // Real-time Update
+        const io = getIo();
+        recipients.forEach(userId => {
+             io.to(`user_${userId}`).emit('PROJECT_UPDATE', updatedProject);
         });
+
+        io.to(`project_${updatedProject.id}`).emit('PROJECT_UPDATE', updatedProject);
+
+        if (statusChanged) {
+            // Filter out current user for notification
+            const notifyRecipients = new Set(recipients);
+            notifyRecipients.delete(req.user.id);
+
+            await createAndBroadcast(Array.from(notifyRecipients), {
+                type: 'STATUS_CHANGE',
+                content: `Status changed to ${status} for "${updatedProject.name}"`,
+                referenceId: updatedProject.id, // Using projectId as reference
+                projectId: updatedProject.id
+            });
+        }
     }
 
     res.json(updatedProject);
@@ -1417,7 +1775,7 @@ router.patch('/videos/:id', authenticateToken, async (req, res) => {
     }
 });
 
-// DELETE /projects/:id: Delete a project
+// DELETE /projects/:id: Soft Delete a project (Trash)
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
     const projectId = parseInt(req.params.id);
@@ -1440,19 +1798,334 @@ router.delete('/:id', authenticateToken, async (req, res) => {
         return res.status(403).json({ error: 'Access denied' });
     }
 
-    const videos = await prisma.video.findMany({ where: { projectId } });
-    for (const video of videos) {
-       if (video.path && fs.existsSync(video.path)) {
-           try { fs.unlinkSync(video.path); } catch(e) { console.error('Error deleting file', e); }
-       }
+    // Soft Delete
+    await prisma.project.update({
+        where: { id: projectId },
+        data: { deletedAt: new Date() }
+    });
+
+    // Real-time Update (Trash)
+    if (project.teamId) {
+        const team = await prisma.team.findUnique({
+            where: { id: project.teamId },
+            include: { members: { select: { id: true } }, owner: { select: { id: true } } }
+        });
+
+        if (team) {
+            const recipients = new Set();
+            recipients.add(team.ownerId);
+            team.members.forEach(m => recipients.add(m.id));
+
+            const io = getIo();
+            recipients.forEach(userId => {
+                 // Emitting PROJECT_DELETE causes frontend to remove from list and fetch trash count
+                 io.to(`user_${userId}`).emit('PROJECT_DELETE', { id: projectId });
+            });
+        }
+    } else {
+        // Admin personal project
+        const io = getIo();
+        io.to(`user_${req.user.id}`).emit('PROJECT_DELETE', { id: projectId });
     }
 
-    await prisma.project.delete({ where: { id: projectId } });
-    res.json({ message: 'Project deleted successfully' });
+    res.json({ message: 'Project moved to trash' });
   } catch (error) {
     console.error('Error deleting project:', error);
     res.status(500).json({ error: 'Failed to delete project' });
   }
+});
+
+// POST /projects/:id/restore: Restore a project from Trash
+router.post('/:id/restore', authenticateToken, async (req, res) => {
+  try {
+    const projectId = parseInt(req.params.id);
+    const user = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        include: { teams: { select: { id: true } }, ownedTeams: { select: { id: true } } }
+    });
+
+    if (!user) {
+        return res.status(401).json({ error: 'User not found' });
+    }
+
+    const userTeamIds = [...user.teams.map(t => t.id), ...user.ownedTeams.map(t => t.id)];
+
+    const project = await prisma.project.findUnique({ where: { id: projectId } });
+
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    if (user.role !== 'admin' && (!project.teamId || !userTeamIds.includes(project.teamId))) {
+        return res.status(403).json({ error: 'Access denied' });
+    }
+
+    await prisma.project.update({
+        where: { id: projectId },
+        data: { deletedAt: null }
+    });
+
+    // Real-time Update (Restore)
+    const restoredProject = await prisma.project.findUnique({ where: { id: projectId }, include: { team: true } });
+
+    if (restoredProject.teamId) {
+        const team = await prisma.team.findUnique({
+            where: { id: restoredProject.teamId },
+            include: { members: { select: { id: true } }, owner: { select: { id: true } } }
+        });
+
+        if (team) {
+            const recipients = new Set();
+            recipients.add(team.ownerId);
+            team.members.forEach(m => recipients.add(m.id));
+
+            const io = getIo();
+            recipients.forEach(userId => {
+                 io.to(`user_${userId}`).emit('PROJECT_RESTORE', restoredProject);
+            });
+        }
+    } else {
+        const io = getIo();
+        io.to(`user_${req.user.id}`).emit('PROJECT_RESTORE', restoredProject);
+    }
+
+    res.json({ message: 'Project restored' });
+  } catch (error) {
+    console.error('Error restoring project:', error);
+    res.status(500).json({ error: 'Failed to restore project' });
+  }
+});
+
+// DELETE /projects/:id/permanent: Permanently delete a project
+router.delete('/:id/permanent', authenticateToken, async (req, res) => {
+  try {
+    const projectId = parseInt(req.params.id);
+    const user = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        include: { teams: { select: { id: true } }, ownedTeams: { select: { id: true } } }
+    });
+
+    if (!user) {
+        return res.status(401).json({ error: 'User not found' });
+    }
+
+    const userTeamIds = [...user.teams.map(t => t.id), ...user.ownedTeams.map(t => t.id)];
+
+    const project = await prisma.project.findUnique({ where: { id: projectId } });
+
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    if (user.role !== 'admin' && (!project.teamId || !userTeamIds.includes(project.teamId))) {
+        return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Release Storage Calculation
+    let teamBytesToRelease = 0;
+
+    // 1. Videos
+    const videos = await prisma.video.findMany({ where: { projectId } });
+    for (const video of videos) {
+       teamBytesToRelease += Number(video.size);
+       if (video.path && fs.existsSync(video.path)) {
+           try { fs.unlinkSync(video.path); } catch(e) { console.error('Error deleting file', e); }
+       }
+       // If uploaderId exists, we should release user quota?
+       // Currently we only enforce USER quota on comments.
+       // But if we track upload, we should technically release it.
+       if (video.uploaderId) {
+            // await updateStorage({ userId: video.uploaderId, teamId: null, deltaBytes: -Number(video.size) });
+            // Not doing this yet as we decided User Quota is mostly Comments for now.
+       }
+    }
+
+    // 2. ThreeDAssets
+    const assets = await prisma.threeDAsset.findMany({ where: { projectId } });
+    for (const asset of assets) {
+        teamBytesToRelease += Number(asset.size);
+        if (asset.path && fs.existsSync(asset.path)) {
+            try { fs.unlinkSync(asset.path); } catch(e) {}
+        }
+    }
+
+    // 3. ImageBundles / Images
+    const bundles = await prisma.imageBundle.findMany({ where: { projectId }, include: { images: true } });
+    for (const bundle of bundles) {
+        for (const img of bundle.images) {
+            teamBytesToRelease += Number(img.size);
+            if (img.path && fs.existsSync(img.path)) {
+                try { fs.unlinkSync(img.path); } catch(e) {}
+            }
+        }
+    }
+
+    // 4. Comments (Attachments/Screenshots)
+    // Note: Comment attachments DO count towards User Quota.
+    // We should iterate comments to release USER quota.
+    // However, finding all comments for a project is tricky:
+    // Linked to video/image/asset -> easy.
+    // We need to fetch all comments.
+
+    // Fetch videos IDs, asset IDs, bundle IDs -> Image IDs.
+    const videoIds = videos.map(v => v.id);
+    const assetIds = assets.map(a => a.id);
+    const imageIds = bundles.flatMap(b => b.images.map(i => i.id));
+
+    const comments = await prisma.comment.findMany({
+        where: {
+            OR: [
+                { videoId: { in: videoIds } },
+                { threeDAssetId: { in: assetIds } },
+                { imageId: { in: imageIds } }
+            ]
+        }
+    });
+
+    for (const c of comments) {
+        // Release User Storage
+        if (c.userId && c.size > 0) {
+            await updateStorage({ userId: c.userId, teamId: null, deltaBytes: -Number(c.size) });
+        }
+        // Also release Team Storage? Currently comments don't count towards Team Quota in our logic (only project media).
+        // If they did, we'd add to teamBytesToRelease.
+
+        // Delete files
+        if (c.attachmentPath) {
+             const p = path.join(DATA_PATH, 'media', c.attachmentPath);
+             try { if(fs.existsSync(p)) fs.unlinkSync(p); } catch(e) {}
+        }
+        if (c.screenshotPath) {
+             const p = path.join(DATA_PATH, 'comments', c.screenshotPath);
+             try { if(fs.existsSync(p)) fs.unlinkSync(p); } catch(e) {}
+        }
+    }
+
+    // Update Team Storage
+    if (project.teamId && teamBytesToRelease > 0) {
+        await updateStorage({ teamId: project.teamId, deltaBytes: -teamBytesToRelease });
+    }
+
+    // Real-time Update (DELETE)
+    // We need to notify team members that this project is GONE (so remove from list)
+    if (project.teamId) {
+        const team = await prisma.team.findUnique({
+            where: { id: project.teamId },
+            include: { members: { select: { id: true } }, owner: { select: { id: true } } }
+        });
+
+        if (team) {
+            const recipients = new Set();
+            recipients.add(team.ownerId);
+            team.members.forEach(m => recipients.add(m.id));
+
+            const io = getIo();
+            recipients.forEach(userId => {
+                 io.to(`user_${userId}`).emit('PROJECT_DELETE', { id: projectId });
+            });
+        }
+    } else {
+        const io = getIo();
+        io.to(`user_${req.user.id}`).emit('PROJECT_DELETE', { id: projectId });
+    }
+
+    await prisma.project.delete({ where: { id: projectId } });
+    res.json({ message: 'Project permanently deleted' });
+  } catch (error) {
+    console.error('Error deleting project:', error);
+    res.status(500).json({ error: 'Failed to delete project' });
+  }
+});
+
+// POST /projects/:id/mute: Mute project notifications
+router.post('/:id/mute', authenticateToken, async (req, res) => {
+    try {
+        const projectId = parseInt(req.params.id);
+        const access = await checkProjectAccess(req.user, projectId);
+        if (!access.authorized) return res.status(access.status).json({ error: access.error });
+
+        await prisma.project.update({
+            where: { id: projectId },
+            data: {
+                mutedBy: {
+                    connect: { id: req.user.id }
+                }
+            }
+        });
+        res.json({ message: 'Project muted' });
+    } catch (error) {
+        console.error('Error muting project:', error);
+        res.status(500).json({ error: 'Failed to mute project' });
+    }
+});
+
+// DELETE /projects/:id/mute: Unmute project notifications
+router.delete('/:id/mute', authenticateToken, async (req, res) => {
+    try {
+        const projectId = parseInt(req.params.id);
+        const access = await checkProjectAccess(req.user, projectId);
+        if (!access.authorized) return res.status(access.status).json({ error: access.error });
+
+        await prisma.project.update({
+            where: { id: projectId },
+            data: {
+                mutedBy: {
+                    disconnect: { id: req.user.id }
+                }
+            }
+        });
+        res.json({ message: 'Project unmuted' });
+    } catch (error) {
+        console.error('Error unmuting project:', error);
+        res.status(500).json({ error: 'Failed to unmute project' });
+    }
+});
+
+// DELETE /projects/comments/:commentId: Delete a comment
+router.delete('/comments/:commentId', authenticateToken, async (req, res) => {
+    const commentId = parseInt(req.params.commentId);
+
+    try {
+        const comment = await prisma.comment.findUnique({
+            where: { id: commentId },
+            include: {
+                video: { select: { projectId: true } },
+                image: { include: { bundle: { select: { projectId: true } } } },
+                threeDAsset: { select: { projectId: true } }
+            }
+        });
+
+        if (!comment) return res.status(404).json({ error: 'Comment not found' });
+
+        // Determine Project ID
+        let projectId = null;
+        if (comment.video) projectId = comment.video.projectId;
+        else if (comment.image && comment.image.bundle) projectId = comment.image.bundle.projectId;
+        else if (comment.threeDAsset) projectId = comment.threeDAsset.projectId;
+
+        // Fetch Project to check Team Owner
+        let teamOwnerId = null;
+        if (projectId) {
+            const project = await prisma.project.findUnique({
+                where: { id: projectId },
+                include: { team: true }
+            });
+            if (project && project.team) {
+                teamOwnerId = project.team.ownerId;
+            }
+        }
+
+        // Authorization Logic
+        const isAuthor = comment.userId === req.user.id;
+        const isAdmin = req.user.role === 'admin';
+        const isTeamOwner = teamOwnerId && teamOwnerId === req.user.id;
+
+        if (!isAuthor && !isAdmin && !isTeamOwner) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        await prisma.comment.delete({ where: { id: commentId } });
+        res.json({ message: 'Comment deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting comment:', error);
+        res.status(500).json({ error: 'Failed to delete comment' });
+    }
 });
 
 module.exports = router;

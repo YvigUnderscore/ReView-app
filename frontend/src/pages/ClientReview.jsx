@@ -10,9 +10,11 @@ import ClientLogin from './ClientLogin';
 import ShortcutsModal from '../components/ShortcutsModal';
 import { Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useMobileDetection } from '../components/MobileGuard';
+import io from 'socket.io-client';
 
 const ClientReview = () => {
   const { token } = useParams();
+  const [socket, setSocket] = useState(null);
   const [project, setProject] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -48,7 +50,63 @@ const ClientReview = () => {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const videoPlayerRef = useRef(null);
 
+  const [panelWidth, setPanelWidth] = useState(320); // Default 320px
+  const [mobileVideoHeight, setMobileVideoHeight] = useState('40%');
+  const [isPanelCollapsed, setIsPanelCollapsed] = useState(false); // Local collapse state for logic usage
+
   const { isMobile, isLandscape } = useMobileDetection();
+
+  const isResizing = useRef(false);
+
+  const startResize = (e) => {
+      isResizing.current = true;
+      e.preventDefault();
+      document.addEventListener('mousemove', handleResize);
+      document.addEventListener('mouseup', stopResize);
+      document.addEventListener('touchmove', handleResize);
+      document.addEventListener('touchend', stopResize);
+  };
+
+  const handleResize = (e) => {
+      if (!isResizing.current) return;
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+      if (isMobile && !isLandscape) {
+         const percentage = (clientY / window.innerHeight) * 100;
+         if (percentage > 20 && percentage < 80) setMobileVideoHeight(`${percentage}%`);
+      } else {
+         const newWidth = window.innerWidth - clientX;
+         if (newWidth < 280) {
+             setShowMobileComments(false); // In ClientReview, 'showMobileComments' acts as visibility toggle on mobile logic, but here acts as collapsed on desktop logic if we unify?
+             // Actually, ClientReview uses showMobileComments for visibility on mobile.
+             // For desktop, it renders always unless we add collapse logic.
+             // The original code:
+             // (!isMobile || (isMobile && isLandscape && mobileRightPanelDocked)) ? 'md:relative relative block md:w-80 w-80 ...'
+             // It doesn't have isPanelCollapsed state like App.jsx.
+             // Let's rely on width < 280 closing it?
+             // Or just set width to 0/hidden?
+             // But the logic is: if < 280, close.
+             // ClientReview currently doesn't have a "Open Comments" button on desktop if closed?
+             // App.jsx has one. ClientReview handles it differently.
+             // Let's assume we just clamp min width or if < 280 snap to closed, but we need a way to reopen.
+             // I'll add isPanelCollapsed state above.
+             setIsPanelCollapsed(true);
+             stopResize();
+         } else if (newWidth > 280 && newWidth < 800) {
+             setPanelWidth(newWidth);
+             setIsPanelCollapsed(false);
+         }
+      }
+  };
+
+  const stopResize = () => {
+      isResizing.current = false;
+      document.removeEventListener('mousemove', handleResize);
+      document.removeEventListener('mouseup', stopResize);
+      document.removeEventListener('touchmove', handleResize);
+      document.removeEventListener('touchend', stopResize);
+  };
 
   const fetchProject = async () => {
     try {
@@ -74,6 +132,41 @@ const ClientReview = () => {
   useEffect(() => {
     fetchProject();
   }, [token]);
+
+  // Socket Connection for Guest
+  useEffect(() => {
+    if (!project) return;
+
+    // Connect without auth token (Guest mode)
+    // or pass token in query if needed, but backend check verifies token.
+    // Here we are guest, no JWT.
+    // We can join project room via explicit event.
+
+    // NOTE: In production behind Nginx, path might be needed.
+    // Development uses proxy.
+    const newSocket = io(window.location.origin, {
+       path: '/socket.io/',
+       transports: ['websocket'],
+       query: { token }
+    });
+
+    newSocket.on('connect', () => {
+       newSocket.emit('join_project', project.id);
+    });
+
+    newSocket.on('COMMENT_ADDED', (data) => {
+        if (data.projectId === project.id) {
+            // Refetch to ensure consistency, or append locally
+             fetchProject();
+        }
+    });
+
+    setSocket(newSocket);
+
+    return () => {
+        newSocket.disconnect();
+    };
+  }, [project?.id]); // Re-connect if project ID changes (unlikely)
 
   useEffect(() => {
       const handleGlobalKeyDown = (e) => {
@@ -231,7 +324,10 @@ const ClientReview = () => {
                 </button>
              )}
 
-             <div className={`${isMobile && !isLandscape ? (showMobileComments ? 'h-[40%]' : 'flex-1') : 'flex-1'} flex flex-col min-w-0 bg-black relative min-h-0 transition-all duration-300`}>
+             <div
+                 className={`${isMobile && !isLandscape ? (showMobileComments ? '' : 'flex-1') : 'flex-1'} flex flex-col min-w-0 bg-black relative min-h-0 transition-all duration-300`}
+                 style={isMobile && !isLandscape && showMobileComments ? { height: mobileVideoHeight } : {}}
+             >
                  <div className="flex-1 relative flex items-center justify-center min-h-0 p-4">
                     {assetType === 'video' ? (
                         <VideoPlayer
@@ -326,6 +422,9 @@ const ClientReview = () => {
                             onToggleComments={() => {
                                 if (isMobile && isLandscape) {
                                     setMobileRightPanelDocked(!mobileRightPanelDocked);
+                                } else if (!isMobile) {
+                                    // Desktop toggle
+                                    setIsPanelCollapsed(!isPanelCollapsed);
                                 } else {
                                     setShowMobileComments(!showMobileComments);
                                 }
@@ -335,11 +434,34 @@ const ClientReview = () => {
                      </>
                  )}
              </div>
-             <div className={`
-                 ${(!isMobile || (isMobile && isLandscape && mobileRightPanelDocked)) ? 'md:relative relative block md:w-80 w-80 h-full border-l border-border z-0' : 'relative block w-full bg-background flex flex-col transition-all duration-300'}
-                 ${(isMobile && !isLandscape) ? (showMobileComments ? 'flex-1' : 'h-0 overflow-hidden') : ''}
-                 ${(isMobile && isLandscape && !mobileRightPanelDocked) ? 'hidden' : ''}
-             `}>
+
+             {/* Resize Handles */}
+             {(!isPanelCollapsed && !isMobile || (isMobile && isLandscape && mobileRightPanelDocked)) && (
+                <div
+                    className="w-1 cursor-col-resize hover:bg-primary/50 bg-transparent transition-colors z-10 hidden md:block"
+                    onMouseDown={startResize}
+                    onTouchStart={startResize}
+                />
+             )}
+             {(isMobile && !isLandscape && showMobileComments) && (
+                 <div
+                    className="h-1.5 w-full cursor-row-resize bg-border flex items-center justify-center"
+                    onMouseDown={startResize}
+                    onTouchStart={startResize}
+                 >
+                     <div className="w-10 h-1 bg-muted-foreground/30 rounded-full" />
+                 </div>
+            )}
+
+             <div
+                 className={`
+                    ${(!isMobile || (isMobile && isLandscape && mobileRightPanelDocked)) ? 'md:relative relative block h-full border-l border-border z-0' : 'relative block w-full bg-background flex flex-col transition-all duration-300'}
+                    ${(isMobile && !isLandscape) ? (showMobileComments ? 'flex-1' : 'h-0 overflow-hidden') : ''}
+                    ${isPanelCollapsed ? 'w-0 overflow-hidden' : ''}
+                    ${(isMobile && isLandscape && !mobileRightPanelDocked) ? 'hidden' : ''}
+                 `}
+                 style={(!isMobile || (isMobile && isLandscape && mobileRightPanelDocked)) && !isPanelCollapsed ? { width: panelWidth } : {}}
+             >
                 <ActivityPanel
                     projectId={project.id}
                     videoId={assetType === 'video' ? activeAsset.id : null}
@@ -412,6 +534,15 @@ const ClientReview = () => {
                              }
                          }
                     }}
+                    onCommentDeleted={(commentId) => {
+                         let updatedList = assetType === 'video' ? [...project.videos] : [...project.threeDAssets];
+                         updatedList[0].comments = updatedList[0].comments.filter(c => c.id !== commentId);
+                         if (assetType === 'video') {
+                             setProject({ ...project, videos: updatedList });
+                         } else {
+                             setProject({ ...project, threeDAssets: updatedList });
+                         }
+                    }}
                     onToggleDrawing={handleTriggerDrawing}
                     isGuest={true}
                     guestName={guestName}
@@ -420,10 +551,13 @@ const ClientReview = () => {
                     onClose={() => {
                         if (isMobile && isLandscape) {
                            setMobileRightPanelDocked(false);
+                        } else if (!isMobile) {
+                            setIsPanelCollapsed(true);
                         } else {
                            setShowMobileComments(false);
                         }
                     }}
+                    onCollapse={() => setIsPanelCollapsed(true)}
                     onInputFocus={handleInputFocus}
                 />
              </div>

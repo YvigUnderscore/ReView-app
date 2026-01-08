@@ -7,7 +7,37 @@ const path = require('path');
 const router = express.Router();
 const prisma = new PrismaClient();
 
-// GET /api/users/me/preferences
+// GET /api/users/search: Search for users by name or email
+router.get('/search', authenticateToken, async (req, res) => {
+    const { q } = req.query;
+    if (!q || q.length < 2) {
+        return res.json([]);
+    }
+
+    try {
+        const users = await prisma.user.findMany({
+            where: {
+                OR: [
+                    { name: { contains: q } },
+                    { email: { contains: q } }
+                ]
+            },
+            take: 10,
+            select: {
+                id: true,
+                name: true,
+                email: true,
+                avatarPath: true
+            }
+        });
+        res.json(users);
+    } catch (error) {
+        console.error("User search error:", error);
+        res.status(500).json({ error: 'Failed to search users' });
+    }
+});
+
+// GET /api/users/me/preferences (Notification Preferences)
 router.get('/me/preferences', authenticateToken, async (req, res) => {
     try {
         const prefs = await prisma.notificationPreference.findMany({
@@ -20,7 +50,7 @@ router.get('/me/preferences', authenticateToken, async (req, res) => {
     }
 });
 
-// PATCH /api/users/me/preferences
+// PATCH /api/users/me/preferences (Notification Preferences)
 router.patch('/me/preferences', authenticateToken, async (req, res) => {
     const { type, channel, enabled } = req.body;
     // Body expected: { type: 'MENTION', channel: 'email', enabled: false }
@@ -51,6 +81,36 @@ router.patch('/me/preferences', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error("Update Prefs Error:", error);
         res.status(500).json({ error: 'Failed to update preferences' });
+    }
+});
+
+// PATCH /api/users/me/client-preferences (General User Preferences JSON)
+router.patch('/me/client-preferences', authenticateToken, async (req, res) => {
+    try {
+        const user = await prisma.user.findUnique({
+             where: { id: req.user.id },
+             select: { preferences: true }
+        });
+
+        if (!user) return res.sendStatus(404);
+
+        let currentPrefs = {};
+        try {
+            currentPrefs = user.preferences ? JSON.parse(user.preferences) : {};
+        } catch (e) {}
+
+        const newPrefs = { ...currentPrefs, ...req.body };
+
+        const updated = await prisma.user.update({
+            where: { id: req.user.id },
+            data: { preferences: JSON.stringify(newPrefs) },
+            select: { preferences: true }
+        });
+
+        res.json(JSON.parse(updated.preferences));
+    } catch (error) {
+        console.error("Update Client Prefs Error:", error);
+        res.status(500).json({ error: 'Failed to update client preferences' });
     }
 });
 

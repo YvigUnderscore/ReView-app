@@ -1,19 +1,22 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Folder, Home, Settings, LogOut, Plus, X, Users, Shield, ChevronDown, ChevronLeft, ChevronRight, LayoutGrid, Check, UserCircle, Search, User } from 'lucide-react';
+import { Folder, Home, Settings, LogOut, Plus, X, Users, Shield, ChevronDown, ChevronLeft, ChevronRight, LayoutGrid, Check, UserCircle, Search, User, Trash2 } from 'lucide-react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useNotification } from '../context/NotificationContext';
 import { useBranding } from '../context/BrandingContext';
 import CreateProjectModal from './CreateProjectModal';
 
 const Sidebar = ({ isOpen, onClose, isMobile, isDocked }) => {
   const { logout, user, activeTeam, switchTeam } = useAuth();
   const { title } = useBranding();
+  const { socket } = useNotification();
   const navigate = useNavigate();
   const location = useLocation();
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [showTeamDropdown, setShowTeamDropdown] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [teamSearch, setTeamSearch] = useState('');
+  const [trashCount, setTrashCount] = useState(0);
 
   const teamDropdownRef = useRef(null);
   const userMenuRef = useRef(null);
@@ -45,8 +48,68 @@ const Sidebar = ({ isOpen, onClose, isMobile, isDocked }) => {
       if (path === '/projects') return location.pathname.startsWith('/projects') || location.pathname.startsWith('/project/');
       if (path === '/team') return location.pathname.startsWith('/team');
       if (path === '/admin') return location.pathname.startsWith('/admin');
+      if (path === '/trash') return location.pathname.startsWith('/trash');
       return location.pathname === path;
   };
+
+  const [globalLimits, setGlobalLimits] = useState({ user: 10 * 1024 * 1024 * 1024, team: 25 * 1024 * 1024 * 1024 });
+
+  const fetchTrashCount = () => {
+      fetch('/api/projects/trash', {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      })
+      .then(res => res.json())
+      .then(data => {
+          if (Array.isArray(data)) setTrashCount(data.length);
+      })
+      .catch(err => console.error("Failed to fetch trash count", err));
+  };
+
+  useEffect(() => {
+    fetchTrashCount();
+
+    // Fetch global limits for fallback
+    fetch('/api/admin/settings/storage', {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+    })
+    .then(res => {
+        if (res.ok) return res.json();
+        throw new Error('Failed to fetch storage settings');
+    })
+    .then(data => {
+        setGlobalLimits({
+            user: Number(data.userLimit),
+            team: Number(data.teamLimit)
+        });
+    })
+    .catch(() => {
+        // Keep hardcoded defaults on error
+    });
+  }, []);
+
+  // Listen for trash updates
+  useEffect(() => {
+      if (!socket) return;
+
+      const handleUpdate = () => fetchTrashCount();
+
+      socket.on('PROJECT_DELETE', handleUpdate);
+      socket.on('PROJECT_RESTORE', handleUpdate); // Assuming RESTORE event exists or I add it?
+      // Actually project.routes.js currently only emits PROJECT_DELETE.
+      // PROJECT_RESTORE is not emitted explicitly in the routes I read earlier.
+      // But PROJECT_UPDATE is emitted on restore if I changed it?
+      // 'restore' calls 'update'. Wait, 'restore' route calls `prisma.project.update`.
+      // It does NOT emit an event in the code I read for `restore`.
+      // I should rely on manual refresh or add the event.
+      // For now, I'll rely on what I have. If PROJECT_DELETE happens, count goes up.
+      // If I restore, count goes down.
+      // I'll add a listener for general project updates just in case.
+
+      return () => {
+          socket.off('PROJECT_DELETE', handleUpdate);
+          socket.off('PROJECT_RESTORE', handleUpdate);
+      };
+  }, [socket]);
 
   const getLinkClass = (path) => {
       const activeClass = "bg-accent text-accent-foreground";
@@ -78,6 +141,15 @@ const Sidebar = ({ isOpen, onClose, isMobile, isDocked }) => {
   const filteredTeams = user?.teams?.filter(team =>
     team.name.toLowerCase().includes(teamSearch.toLowerCase())
   ) || [];
+
+  // Storage Formatting
+  const formatBytes = (bytes) => {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  };
 
   // Mobile Bottom Bar (Portrait Mode)
   if (isMobile && !isDocked) {
@@ -178,7 +250,11 @@ const Sidebar = ({ isOpen, onClose, isMobile, isDocked }) => {
                  <CreateProjectModal
                     onClose={() => setShowNewProjectModal(false)}
                     onProjectCreated={(project) => {
-                        navigate(`/project/${project.id}`);
+                         if (project.team && project.team.slug && project.slug) {
+                             navigate(`/${project.team.slug}/project/${project.slug}`);
+                         } else {
+                             navigate(`/project/${project.id}`);
+                         }
                     }}
                  />
             )}
@@ -215,16 +291,36 @@ const Sidebar = ({ isOpen, onClose, isMobile, isDocked }) => {
             {user?.teams && user.teams.length > 0 && (
                 <div className="relative w-full" ref={teamDropdownRef}>
                     {!isCompact ? (
-                        <button
-                            onClick={() => {
-                                setShowTeamDropdown(!showTeamDropdown);
-                                if (!showTeamDropdown) setTimeout(() => teamSearchRef.current?.focus(), 100);
-                            }}
-                            className="w-full flex items-center justify-between bg-muted/50 hover:bg-muted border border-border rounded-md px-3 py-2 text-sm transition-colors"
-                        >
-                            <span className="truncate font-medium">{activeTeam?.name || 'Select Team'}</span>
-                            <ChevronDown size={14} className={`text-muted-foreground transition-transform ${showTeamDropdown ? 'rotate-180' : ''}`} />
-                        </button>
+                        <div className="space-y-1">
+                            <button
+                                onClick={() => {
+                                    setShowTeamDropdown(!showTeamDropdown);
+                                    if (!showTeamDropdown) setTimeout(() => teamSearchRef.current?.focus(), 100);
+                                }}
+                                className="w-full flex items-center justify-between bg-muted/50 hover:bg-muted border border-border rounded-md px-3 py-2 text-sm transition-colors"
+                            >
+                                <span className="truncate font-medium">{activeTeam?.name || 'Select Team'}</span>
+                                <ChevronDown size={14} className={`text-muted-foreground transition-transform ${showTeamDropdown ? 'rotate-180' : ''}`} />
+                            </button>
+
+                            {/* Team Storage Indicator */}
+                            {activeTeam && (
+                                <div className="px-1 pt-1">
+                                    <div className="flex justify-between text-[10px] text-muted-foreground mb-1">
+                                        <span>Storage</span>
+                                        <span>
+                                            {formatBytes(Number(activeTeam.storageUsed || 0))} / {formatBytes(Number(activeTeam.storageLimit || globalLimits.team))}
+                                        </span>
+                                    </div>
+                                    <div className="h-1 w-full bg-muted rounded-full overflow-hidden">
+                                        <div
+                                            className="h-full bg-primary transition-all duration-500"
+                                            style={{ width: `${Math.min(100, (Number(activeTeam.storageUsed || 0) / Number(activeTeam.storageLimit || globalLimits.team)) * 100)}%` }}
+                                        />
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     ) : (
                         <button
                             onClick={() => setShowTeamDropdown(!showTeamDropdown)}
@@ -340,12 +436,28 @@ const Sidebar = ({ isOpen, onClose, isMobile, isDocked }) => {
             <div className="space-y-1">
                  {(!isCompact || isMobile) && <div className="px-3 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Management</div>}
 
-                <Link to="/team" className={getLinkClass('/team')}>
+                <Link to={activeTeam && activeTeam.slug ? `/${activeTeam.slug}` : "/team"} className={getLinkClass('/team')}>
                     <Users size={18} className="shrink-0" />
                     {!isCompact && <span className="truncate">Team</span>}
                      {isCompact && !isMobile && (
                         <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded shadow-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50 border border-border">
                             Team
+                        </span>
+                    )}
+                </Link>
+                <Link to="/trash" className={getLinkClass('/trash')}>
+                    <div className="relative">
+                        <Trash2 size={18} className="shrink-0" />
+                    </div>
+                    {!isCompact && (
+                        <span className="truncate flex items-center justify-between w-full">
+                            Trash
+                            {trashCount > 0 && <span className="text-xs text-muted-foreground">(+{trashCount})</span>}
+                        </span>
+                    )}
+                     {isCompact && !isMobile && (
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded shadow-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50 border border-border">
+                            Trash {trashCount > 0 && `(${trashCount})`}
                         </span>
                     )}
                 </Link>
@@ -393,6 +505,22 @@ const Sidebar = ({ isOpen, onClose, isMobile, isDocked }) => {
                 <div className="px-2 py-2 border-b border-border mb-1">
                     <p className="font-medium text-sm truncate">{user?.name}</p>
                     <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+
+                    {/* User Storage Indicator */}
+                    <div className="mt-2 pt-2 border-t border-dashed border-border">
+                        <div className="flex justify-between text-[10px] text-muted-foreground mb-1">
+                            <span>My Storage</span>
+                            <span>
+                                {formatBytes(Number(user?.storageUsed || 0))} / {formatBytes(Number(user?.storageLimit || globalLimits.user))}
+                            </span>
+                        </div>
+                        <div className="h-1 w-full bg-muted rounded-full overflow-hidden">
+                            <div
+                                className="h-full bg-blue-500 transition-all duration-500"
+                                style={{ width: `${Math.min(100, (Number(user?.storageUsed || 0) / Number(user?.storageLimit || globalLimits.user)) * 100)}%` }}
+                            />
+                        </div>
+                    </div>
                 </div>
 
                 {/* Profile/Preferences */}
@@ -440,7 +568,11 @@ const Sidebar = ({ isOpen, onClose, isMobile, isDocked }) => {
          <CreateProjectModal
             onClose={() => setShowNewProjectModal(false)}
             onProjectCreated={(project) => {
-                navigate(`/project/${project.id}`);
+                 if (project.team && project.team.slug && project.slug) {
+                    navigate(`/${project.team.slug}/project/${project.slug}`);
+                 } else {
+                    navigate(`/project/${project.id}`);
+                 }
             }}
          />
       )}

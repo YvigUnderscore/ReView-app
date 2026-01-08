@@ -1,11 +1,16 @@
 require('dotenv').config();
+require('./utils/bigint-patch'); // Apply BigInt JSON serialization patch
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
-const { init: initSocket } = require('./services/socketService');
+const { init: initSocket, getIo } = require('./services/socketService');
+const { runCleanup } = require('./services/cleanupService');
+const { initEmailService } = require('./services/emailService');
+const { initCron } = require('./services/cronService');
+const { initSystemStats } = require('./services/systemStatsService');
 
 // Ensure storage directory exists
 const DATA_PATH = process.env.DATA_PATH || path.join(__dirname, 'storage');
@@ -30,7 +35,20 @@ const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 
 // Initialize Socket.io
-initSocket(server);
+const io = initSocket(server);
+
+// Initialize Email Service
+initEmailService();
+
+// Initialize Cron Jobs
+initCron();
+
+// Initialize System Stats
+initSystemStats(io);
+
+// Run Cleanup (every hour)
+runCleanup();
+setInterval(runCleanup, 60 * 60 * 1000);
 
 // Middleware
 app.set('trust proxy', 1); // Trust first proxy (Nginx) for Rate Limiting

@@ -96,7 +96,7 @@ router.post('/setup', async (req, res) => {
 
     // Auto-login after setup
     const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
-    res.json({ token, user: { id: user.id, email: user.email, role: user.role, name: user.name, teams: [] } });
+    res.json({ token, user: { id: user.id, email: user.email, role: user.role, name: user.name, preferences: user.preferences, teams: [] } });
 
   } catch (error) {
     console.error("Auth Setup Error:", error);
@@ -162,7 +162,7 @@ router.post('/register', registerLimiter, async (req, res) => {
     });
 
     const jwtToken = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
-    res.json({ token: jwtToken, user: { id: user.id, email: user.email, role: user.role, name: user.name, teams: [] } });
+    res.json({ token: jwtToken, user: { id: user.id, email: user.email, role: user.role, name: user.name, preferences: user.preferences, teams: [] } });
 
   } catch (error) {
     console.error(error);
@@ -185,8 +185,8 @@ router.post('/login', loginLimiter, async (req, res) => {
     const user = await prisma.user.findUnique({
       where: { email },
       include: {
-        teams: { select: { id: true, name: true } },
-        ownedTeams: { select: { id: true, name: true } }
+        teams: { select: { id: true, name: true, storageUsed: true, storageLimit: true } },
+        ownedTeams: { select: { id: true, name: true, storageUsed: true, storageLimit: true } }
       }
     });
     if (!user) {
@@ -205,7 +205,19 @@ router.post('/login', loginLimiter, async (req, res) => {
     const uniqueTeams = Array.from(new Map(allTeams.map(t => [t.id, t])).values());
 
     const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
-    res.json({ token, user: { id: user.id, email: user.email, role: user.role, name: user.name, teams: uniqueTeams } });
+    res.json({
+        token,
+        user: {
+            id: user.id,
+            email: user.email,
+            role: user.role,
+            name: user.name,
+            preferences: user.preferences,
+            storageUsed: user.storageUsed,
+            storageLimit: user.storageLimit,
+            teams: uniqueTeams
+        }
+    });
 
   } catch (error) {
     console.error("Auth Login Error:", error);
@@ -219,8 +231,8 @@ router.get('/me', authenticateToken, async (req, res) => {
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
       include: {
-        teams: { select: { id: true, name: true } },
-        ownedTeams: { select: { id: true, name: true } }
+        teams: { select: { id: true, name: true, storageUsed: true, storageLimit: true } },
+        ownedTeams: { select: { id: true, name: true, storageUsed: true, storageLimit: true } }
       }
     });
     if (!user) return res.sendStatus(404);
@@ -228,7 +240,17 @@ router.get('/me', authenticateToken, async (req, res) => {
     const allTeams = [...user.teams, ...user.ownedTeams];
     const uniqueTeams = Array.from(new Map(allTeams.map(t => [t.id, t])).values());
 
-    res.json({ id: user.id, email: user.email, role: user.role, name: user.name, avatarPath: user.avatarPath, teams: uniqueTeams });
+    res.json({
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        name: user.name,
+        avatarPath: user.avatarPath,
+        preferences: user.preferences,
+        storageUsed: user.storageUsed,
+        storageLimit: user.storageLimit,
+        teams: uniqueTeams
+    });
   } catch (error) {
     console.error("Auth Me Error:", error);
     res.sendStatus(500);
