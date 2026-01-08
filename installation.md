@@ -5,7 +5,7 @@
 
 ## Environment Variables
 The application requires the following environment variables to be set (e.g., in a `.env` file):
-- `JWT_SECRET`: A strong, random string used to sign authentication tokens. **Required.**
+- ⚠️⚠️`JWT_SECRET`: A strong, random string used to sign authentication tokens. **Required.**⚠️⚠️
 - `DATA_PATH`: Path to store application data (defaults to internal storage).
 - `PORT`: If needed you can change the default value (3429) of your instance.
 ## Quick Start
