@@ -15,7 +15,7 @@ The application requires the following environment variables to be set (e.g., in
    git clone https://github.com/YvigUnderscore/ReView-app.git
    cd ReView-app
    ```
-2. **Update your JWT_Secret 
+2. **Update your JWT_Secret variable in .env**
    ```bash
    JWT_SECRET=
    ```
