@@ -16,7 +16,7 @@ The application requires the following environment variables to be set (e.g., in
    cd ReView-app
    ```
 2. **Update your JWT_Secret 
-```bash
+   ```bash
    JWT_SECRET=
    ```
 
