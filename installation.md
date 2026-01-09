@@ -15,15 +15,19 @@ The application requires the following environment variables to be set (e.g., in
    git clone https://github.com/YvigUnderscore/ReView-app.git
    cd ReView-app
    ```
+2. **Update your JWT_Secret 
+```bash
+   JWT_SECRET=
+   ```
 
-2. **Start the application:**
+3. **Start the application:**
    ```bash
    docker-compose up -d --build
    ```
 
     *Note: You can change the port by adding `PORT=YOUR_PORT` to your `.env` file. Default is 3429.*
 
-3. **Access the interface:**
+4. **Access the interface:**
     Open your browser at `http://localhost:3429` (or the port you configured).
 
 ## Configuration
