@@ -9,6 +9,8 @@ export const BrandingProvider = ({ children }) => {
     const [iconUrl, setIconUrl] = useState('/vite.svg');
     const [dateFormat, setDateFormat] = useState('DD/MM/YYYY');
 
+    const [config, setConfig] = useState(null);
+
     const fetchConfig = async () => {
         try {
             const res = await fetch('/api/system/config');
@@ -17,6 +19,7 @@ export const BrandingProvider = ({ children }) => {
                 setTitle(data.title);
                 setIconUrl(data.iconUrl);
                 if (data.dateFormat) setDateFormat(data.dateFormat);
+                setConfig(data);
             }
         } catch (e) {
             console.error("Failed to load system config", e);
@@ -42,7 +45,7 @@ export const BrandingProvider = ({ children }) => {
     }, [iconUrl]);
 
     return (
-        <BrandingContext.Provider value={{ title, iconUrl, dateFormat, refreshConfig: fetchConfig }}>
+        <BrandingContext.Provider value={{ title, iconUrl, dateFormat, config, refreshConfig: fetchConfig }}>
             {children}
         </BrandingContext.Provider>
     );

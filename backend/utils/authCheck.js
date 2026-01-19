@@ -13,11 +13,11 @@ const checkProjectAccess = async (userOrId, projectId) => {
 
     if (!userId) return { authorized: false, error: 'User ID required', status: 401 };
 
-    // Fetch fresh user data including teams
+    // Fetch fresh user data including explicit team memberships
     const user = await prisma.user.findUnique({
         where: { id: userId },
         include: {
-            teams: { select: { id: true } },
+            teamMemberships: { select: { teamId: true, role: true } },
             ownedTeams: { select: { id: true } }
         }
     });
@@ -27,11 +27,27 @@ const checkProjectAccess = async (userOrId, projectId) => {
     const project = await prisma.project.findUnique({ where: { id: parseInt(projectId) } });
     if (!project) return { authorized: false, error: 'Project not found', status: 404 };
 
-    const userTeamIds = [...user.teams.map(t => t.id), ...user.ownedTeams.map(t => t.id)];
+    // User is global admin
+    if (user.role === 'admin') {
+        return { authorized: true, project, user };
+    }
 
-    // Admin Access or Team Membership
-    if (user.role !== 'admin' && (!project.teamId || !userTeamIds.includes(project.teamId))) {
-        return { authorized: false, error: 'Access denied', status: 403 };
+    // User is team owner
+    const isOwner = user.ownedTeams.some(t => t.id === project.teamId);
+    if (isOwner) {
+        return { authorized: true, project, user };
+    }
+
+    // Check membership
+    const membership = user.teamMemberships.find(tm => tm.teamId === project.teamId);
+
+    if (!membership) {
+         return { authorized: false, error: 'Access denied', status: 403 };
+    }
+
+    // Check Client Restriction
+    if (membership.role === 'CLIENT' && project.status !== 'CLIENT_REVIEW') {
+         return { authorized: false, error: 'Access restricted to client reviews', status: 403 };
     }
 
     return { authorized: true, project, user };

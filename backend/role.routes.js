@@ -12,12 +12,12 @@ router.get('/', authenticateToken, async (req, res) => {
         const user = await prisma.user.findUnique({
             where: { id: req.user.id },
             include: {
-                teams: true,
+                teamMemberships: { include: { team: true } },
                 ownedTeams: true
             }
         });
 
-        const isMember = user.teams.some(t => t.id === teamId);
+        const isMember = user.teamMemberships.some(tm => tm.team.id === teamId);
         const isOwner = user.ownedTeams.some(t => t.id === teamId);
 
         if (!isMember && !isOwner && user.role !== 'admin') {
@@ -44,12 +44,16 @@ router.post('/', authenticateToken, async (req, res) => {
         if (!name) return res.status(400).json({ error: 'Role name is required' });
 
         const user = await prisma.user.findUnique({ where: { id: req.user.id } });
-        // Only owners or admins? For now, let's say any team member can create role or restrict to owner.
-        // Let's restrict to owner or admin for now as per "Role assigner" usually implies admin.
         const team = await prisma.team.findUnique({ where: { id: teamId } });
 
-        if (user.role !== 'admin' && team.ownerId !== user.id) {
-            return res.status(403).json({ error: 'Only team owner can manage roles' });
+        // Check Team Admin
+        const membership = await prisma.teamMembership.findUnique({
+            where: { userId_teamId: { userId: req.user.id, teamId } }
+        });
+        const isTeamAdmin = membership && membership.role === 'ADMIN';
+
+        if (user.role !== 'admin' && team.ownerId !== user.id && !isTeamAdmin) {
+            return res.status(403).json({ error: 'Only team owner or admins can manage roles' });
         }
 
         const role = await prisma.teamRole.create({
@@ -71,10 +75,17 @@ router.delete('/:roleId', authenticateToken, async (req, res) => {
     try {
         const teamId = parseInt(req.params.teamId);
         const roleId = parseInt(req.params.roleId);
+
         const user = await prisma.user.findUnique({ where: { id: req.user.id } });
         const team = await prisma.team.findUnique({ where: { id: teamId } });
 
-        if (user.role !== 'admin' && team.ownerId !== user.id) {
+        // Check Team Admin
+        const membership = await prisma.teamMembership.findUnique({
+            where: { userId_teamId: { userId: req.user.id, teamId } }
+        });
+        const isTeamAdmin = membership && membership.role === 'ADMIN';
+
+        if (user.role !== 'admin' && team.ownerId !== user.id && !isTeamAdmin) {
             return res.status(403).json({ error: 'Access denied' });
         }
 
@@ -98,19 +109,25 @@ router.post('/:roleId/assign', authenticateToken, async (req, res) => {
         const user = await prisma.user.findUnique({ where: { id: req.user.id } });
         const team = await prisma.team.findUnique({ where: { id: teamId } });
 
-        if (user.role !== 'admin' && team.ownerId !== user.id) {
+        // Check Team Admin
+        const membership = await prisma.teamMembership.findUnique({
+            where: { userId_teamId: { userId: req.user.id, teamId } }
+        });
+        const isTeamAdmin = membership && membership.role === 'ADMIN';
+
+        if (user.role !== 'admin' && team.ownerId !== user.id && !isTeamAdmin) {
             return res.status(403).json({ error: 'Access denied' });
         }
 
         // Verify user belongs to team
         const targetUser = await prisma.user.findUnique({
             where: { id: userId },
-            include: { teams: true, ownedTeams: true }
+            include: { teamMemberships: { include: { team: true } }, ownedTeams: true }
         });
 
         if (!targetUser) return res.status(404).json({ error: 'User not found' });
 
-        const isMember = targetUser.teams.some(t => t.id === teamId) || targetUser.ownedTeams.some(t => t.id === teamId);
+        const isMember = targetUser.teamMemberships.some(tm => tm.team.id === teamId) || targetUser.ownedTeams.some(t => t.id === teamId);
 
         if (!isMember) {
             return res.status(400).json({ error: 'User is not in this team' });
@@ -136,16 +153,20 @@ router.delete('/:roleId/remove', authenticateToken, async (req, res) => {
     try {
         const teamId = parseInt(req.params.teamId);
         const roleId = parseInt(req.params.roleId);
-        const { userId } = req.body; // In DELETE, body is not always reliable/standard, but Express allows it.
-                                     // Alternatively could use query param or path param.
-                                     // Let's check if userId is passed in body.
+        const { userId } = req.body;
 
         if (!userId) return res.status(400).json({ error: 'User ID required' });
 
         const user = await prisma.user.findUnique({ where: { id: req.user.id } });
         const team = await prisma.team.findUnique({ where: { id: teamId } });
 
-        if (user.role !== 'admin' && team.ownerId !== user.id) {
+        // Check Team Admin
+        const membership = await prisma.teamMembership.findUnique({
+            where: { userId_teamId: { userId: req.user.id, teamId } }
+        });
+        const isTeamAdmin = membership && membership.role === 'ADMIN';
+
+        if (user.role !== 'admin' && team.ownerId !== user.id && !isTeamAdmin) {
             return res.status(403).json({ error: 'Access denied' });
         }
 

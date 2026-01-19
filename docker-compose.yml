@@ -16,6 +16,7 @@ services:
       - DATA_PATH=/app/data
       - DATABASE_URL=file:/app/data/review.db
       - JWT_SECRET=${JWT_SECRET}
+      - TZ=Europe/Paris
     volumes:
       # Map host data path to container data path
       # The ${DATA_PATH:-/root/ReView/} syntax defaults to /root/ReView/ if DATA_PATH is not set in .env
