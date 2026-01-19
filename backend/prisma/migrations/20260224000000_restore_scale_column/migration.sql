@@ -1,0 +1,2 @@
+-- Restore scale column dropped by previous migrations
+-- ALTER TABLE "ThreeDAsset" ADD COLUMN "scale" REAL NOT NULL DEFAULT 1.0;

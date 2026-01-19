@@ -8,16 +8,90 @@ const { isValidEmail, isValidText, isValidPassword } = require('./utils/validati
 const router = express.Router();
 const prisma = new PrismaClient();
 
+const { sendDigestEmail, getPublicUrl } = require('./services/emailBatchService');
+
 // Send Test Email
 router.post('/mail/test', authenticateToken, requireAdmin, async (req, res) => {
     try {
-        const { email } = req.body;
+        const { email, type } = req.body;
 
         if (email && !isValidEmail(email)) {
             return res.status(400).json({ error: 'Invalid email format' });
         }
 
         const targetEmail = email || req.user.email;
+        const targetUser = { email: targetEmail, name: 'Admin User' };
+
+        if (type && type !== 'SIMPLE') {
+            let payload = {};
+
+            switch (type) {
+                case 'COMMENT':
+                    payload = {
+                        projectName: 'Test Project',
+                        projectSlug: 'test-project',
+                        teamSlug: 'test-team',
+                        content: 'This is a test comment notification.',
+                        user: { name: 'Test User' },
+                        id: 123,
+                        image: 'logo_full.png' // Added for testing image placement
+                    };
+                    break;
+                case 'MENTION':
+                    payload = {
+                        projectName: 'Test Project',
+                        projectSlug: 'test-project',
+                        teamSlug: 'test-team',
+                        content: 'Hey @Admin, check this out!',
+                        user: { name: 'Colleague' },
+                        id: 124
+                    };
+                    break;
+                case 'PROJECT_CREATE':
+                    payload = {
+                        projectName: 'New Awesome Project',
+                        name: 'New Awesome Project',
+                        slug: 'new-awesome-project',
+                        teamSlug: 'test-team'
+                    };
+                    break;
+                case 'VIDEO_VERSION':
+                    payload = {
+                        projectName: 'Test Project',
+                        projectSlug: 'test-project',
+                        teamSlug: 'test-team',
+                        versionName: 'V05'
+                    };
+                    break;
+                case 'STATUS_CHANGE':
+                    payload = {
+                        projectName: 'Test Project',
+                        projectSlug: 'test-project',
+                        teamSlug: 'test-team',
+                        status: 'Approved'
+                    };
+                    break;
+                case 'TEAM_ADD':
+                    payload = {
+                        teamName: 'Design Team'
+                    };
+                    break;
+                default:
+                    payload = { content: 'Test Event Content' };
+            }
+
+            const item = {
+                type: type,
+                payload: JSON.stringify(payload),
+                createdAt: new Date().toISOString()
+            };
+
+            const publicUrl = await getPublicUrl();
+            // sendDigestEmail expects user object with email, array of items, and publicUrl
+            await sendDigestEmail(targetUser, [item], publicUrl);
+
+            return res.json({ message: `Test email (${type}) sent successfully` });
+        }
 
         const success = await sendEmail(
             targetEmail,
@@ -83,25 +157,33 @@ router.post('/mail/broadcast', authenticateToken, requireAdmin, async (req, res)
 });
 
 router.get('/users', authenticateToken, requireAdmin, async (req, res) => {
-  try {
-    const users = await prisma.user.findMany({
-      select: {
-          id: true,
-          email: true,
-          name: true,
-          role: true,
-          createdAt: true,
-          storageUsed: true,
-          storageLimit: true,
-          teams: { select: { id: true, name: true } },
-          ownedTeams: { select: { id: true, name: true } }
-      }
-    });
-    res.json(users);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to fetch users' });
-  }
+    try {
+        const users = await prisma.user.findMany({
+            select: {
+                id: true,
+                email: true,
+                name: true,
+                role: true,
+                createdAt: true,
+                storageUsed: true,
+                storageLimit: true,
+                teamMemberships: { select: { team: { select: { id: true, name: true } } } },
+                ownedTeams: { select: { id: true, name: true } }
+            }
+        });
+
+        // Map to expected format (flat teams array)
+        const formattedUsers = users.map(user => ({
+            ...user,
+            teams: user.teamMemberships.map(tm => tm.team),
+            teamMemberships: undefined // Remove intermediate field
+        }));
+
+        res.json(formattedUsers);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Failed to fetch users' });
+    }
 });
 
 // GET /api/admin/teams - List all teams with storage info
@@ -129,7 +211,7 @@ router.patch('/teams/:id', authenticateToken, requireAdmin, async (req, res) => 
         const data = {};
         // Allow setting limit to null (to use system default) or a number
         if (storageLimit !== undefined) {
-             data.storageLimit = storageLimit === null ? null : BigInt(storageLimit);
+            data.storageLimit = storageLimit === null ? null : BigInt(storageLimit);
         }
 
         const team = await prisma.team.update({
@@ -148,16 +230,16 @@ router.patch('/teams/:id', authenticateToken, requireAdmin, async (req, res) => 
 });
 
 router.delete('/users/:id', authenticateToken, requireAdmin, async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    if (id === req.user.id) {
-       return res.status(400).json({ error: 'Cannot delete yourself' });
+    try {
+        const id = parseInt(req.params.id);
+        if (id === req.user.id) {
+            return res.status(400).json({ error: 'Cannot delete yourself' });
+        }
+        await prisma.user.delete({ where: { id } });
+        res.json({ message: 'User deleted' });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to delete user' });
     }
-    await prisma.user.delete({ where: { id } });
-    res.json({ message: 'User deleted' });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to delete user' });
-  }
 });
 
 // PATCH /api/admin/users/:id
@@ -188,7 +270,7 @@ router.patch('/users/:id', authenticateToken, requireAdmin, async (req, res) => 
             data.password = await bcrypt.hash(password, 10);
         }
         if (storageLimit !== undefined) {
-             data.storageLimit = storageLimit === null ? null : BigInt(storageLimit);
+            data.storageLimit = storageLimit === null ? null : BigInt(storageLimit);
         }
 
         const user = await prisma.user.update({
@@ -201,12 +283,18 @@ router.patch('/users/:id', authenticateToken, requireAdmin, async (req, res) => 
                 role: true,
                 storageUsed: true,
                 storageLimit: true,
-                teams: { select: { id: true, name: true } },
+                teamMemberships: { select: { team: { select: { id: true, name: true } } } },
                 ownedTeams: { select: { id: true, name: true } }
             }
         });
 
-        res.json(user);
+        const formattedUser = {
+            ...user,
+            teams: user.teamMemberships.map(tm => tm.team),
+            teamMemberships: undefined
+        };
+
+        res.json(formattedUser);
     } catch (error) {
         console.error(error);
         if (error.code === 'P2002') return res.status(400).json({ error: 'Email already in use' });
@@ -245,7 +333,7 @@ router.post('/storage/recalculate', authenticateToken, requireAdmin, async (req,
 
         // 2. ThreeDAssets
         const threeDAssets = await prisma.threeDAsset.findMany({
-             select: { size: true, uploaderId: true, project: { select: { teamId: true } } }
+            select: { size: true, uploaderId: true, project: { select: { teamId: true } } }
         });
         threeDAssets.forEach(a => {
             addToUser(a.uploaderId, a.size);
@@ -304,7 +392,7 @@ router.post('/storage/recalculate', authenticateToken, requireAdmin, async (req,
 
         // Update Teams
         for (const [teamId, size] of Object.entries(teamStorage)) {
-             await prisma.team.update({
+            await prisma.team.update({
                 where: { id: parseInt(teamId) },
                 data: { storageUsed: size }
             });
@@ -314,6 +402,38 @@ router.post('/storage/recalculate', authenticateToken, requireAdmin, async (req,
     } catch (error) {
         console.error('Recalculate error:', error);
         res.status(500).json({ error: 'Failed to recalculate storage' });
+    }
+});
+
+// GET /api/admin/system/settings
+router.get('/system/settings', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const settings = await prisma.systemSetting.findMany();
+        const formatted = {};
+        settings.forEach(s => formatted[s.key] = s.value);
+        res.json(formatted);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Failed to fetch settings' });
+    }
+});
+
+// PATCH /api/admin/system/settings
+router.patch('/system/settings', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const updates = req.body;
+        // Iterate and update
+        for (const [key, value] of Object.entries(updates)) {
+            await prisma.systemSetting.upsert({
+                where: { key },
+                update: { value: String(value) },
+                create: { key, value: String(value) }
+            });
+        }
+        res.json({ message: 'Settings updated' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Failed to update settings' });
     }
 });
 

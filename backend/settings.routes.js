@@ -7,6 +7,7 @@ const { authenticateToken } = require('./middleware');
 const { initEmailService } = require('./services/emailService');
 const { recalculateAllStorage } = require('./utils/storage');
 
+const { getIo } = require('./services/socketService');
 const router = express.Router();
 const prisma = new PrismaClient();
 
@@ -15,7 +16,7 @@ const DATA_PATH = process.env.DATA_PATH || path.join(__dirname, 'storage');
 const SYSTEM_DIR = path.join(DATA_PATH, 'system');
 
 if (!fs.existsSync(SYSTEM_DIR)) {
-  fs.mkdirSync(SYSTEM_DIR, { recursive: true });
+    fs.mkdirSync(SYSTEM_DIR, { recursive: true });
 }
 
 // Multer for icon upload
@@ -42,16 +43,55 @@ router.get('/config', async (req, res) => {
         const iconSetting = await prisma.systemSetting.findUnique({ where: { key: 'site_icon' } });
         const dateFormatSetting = await prisma.systemSetting.findUnique({ where: { key: 'date_format' } });
         const soundSetting = await prisma.systemSetting.findUnique({ where: { key: 'notification_sound' } });
+        const announcementSetting = await prisma.systemSetting.findUnique({ where: { key: 'global_announcement' } });
+
+        let announcement = null;
+        if (announcementSetting && announcementSetting.value) {
+            try {
+                announcement = JSON.parse(announcementSetting.value);
+            } catch (e) {
+                console.error("Failed to parse announcement setting", e);
+            }
+        }
 
         res.json({
             title: titleSetting ? titleSetting.value : 'ReView',
             iconUrl: iconSetting ? `/api/media/system/${iconSetting.value}` : '/vite.svg',
             dateFormat: dateFormatSetting ? dateFormatSetting.value : 'DD/MM/YYYY',
-            notificationSoundUrl: soundSetting ? `/api/media/system/${soundSetting.value}` : null
+            notificationSoundUrl: soundSetting ? `/api/media/system/${soundSetting.value}` : null,
+            announcement
         });
     } catch (e) {
         console.error(e);
         res.status(500).json({ error: 'Failed to fetch config' });
+    }
+});
+
+// PATCH /api/admin/settings/announcement
+// Admin only
+router.patch('/announcement', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+
+    const { message, startAt, endAt, isActive, title, type, icon } = req.body;
+
+    try {
+        const value = JSON.stringify({ message, startAt, endAt, isActive, title, type, icon });
+        await prisma.systemSetting.upsert({
+            where: { key: 'global_announcement' },
+            update: { value },
+            create: { key: 'global_announcement', value }
+        });
+
+        // Emit socket event for real-time updates
+        const io = getIo();
+        if (io) {
+            io.emit('ANNOUNCEMENT_UPDATE', { message, startAt, endAt, isActive, title, type, icon });
+        }
+
+        res.json({ message: 'Announcement updated', announcement: { message, startAt, endAt, isActive, title, type, icon } });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: 'Failed to update announcement' });
     }
 });
 
@@ -78,7 +118,7 @@ router.patch('/', authenticateToken, async (req, res) => {
             }));
         }
         if (retentionDays !== undefined) {
-             updates.push(prisma.systemSetting.upsert({
+            updates.push(prisma.systemSetting.upsert({
                 where: { key: 'trash_retention_days' },
                 update: { value: String(retentionDays) },
                 create: { key: 'trash_retention_days', value: String(retentionDays) }
@@ -252,14 +292,14 @@ router.patch('/storage', authenticateToken, async (req, res) => {
     try {
         const updates = [];
         if (userLimit !== undefined) {
-             updates.push(prisma.systemSetting.upsert({
+            updates.push(prisma.systemSetting.upsert({
                 where: { key: 'storage_limit_user' },
                 update: { value: String(userLimit) },
                 create: { key: 'storage_limit_user', value: String(userLimit) }
             }));
         }
         if (teamLimit !== undefined) {
-             updates.push(prisma.systemSetting.upsert({
+            updates.push(prisma.systemSetting.upsert({
                 where: { key: 'storage_limit_team' },
                 update: { value: String(teamLimit) },
                 create: { key: 'storage_limit_team', value: String(teamLimit) }

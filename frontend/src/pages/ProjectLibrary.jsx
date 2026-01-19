@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Folder, ChevronRight, Plus, ArrowLeft } from 'lucide-react';
+import { AnimatePresence } from 'framer-motion';
 import { useHeader } from '../context/HeaderContext';
 import { useBranding } from '../context/BrandingContext';
 import { useAuth } from '../context/AuthContext';
@@ -316,29 +317,33 @@ const ProjectLibrary = () => {
                     isDestructive={confirmDialog.isDestructive}
                 />
 
-                {showCreateModal && (
-                    <CreateProjectModal
-                        initialTeamId={activeTeamId}
-                        initialFile={createModalFile}
-                        onClose={() => { setShowCreateModal(false); setCreateModalFile(null); }}
-                        onProjectCreated={(newProject) => {
-                            setProjects([newProject, ...projects]);
-                        }}
-                    />
-                )}
+                <AnimatePresence>
+                    {showCreateModal && (
+                        <CreateProjectModal
+                            initialTeamId={activeTeamId}
+                            initialFile={createModalFile}
+                            onClose={() => { setShowCreateModal(false); setCreateModalFile(null); }}
+                            onProjectCreated={(newProject) => {
+                                setProjects([newProject, ...projects]);
+                            }}
+                        />
+                    )}
+                </AnimatePresence>
                 
-                {editingProject && (
-                    <EditProjectModal
-                        project={editingProject}
-                        onClose={() => setEditingProject(null)}
-                        onProjectUpdated={(updated) => {
-                            setProjects(projects.map(p => p.id === updated.id ? updated : p));
-                        }}
-                        onProjectDeleted={(id) => {
-                            setProjects(projects.filter(p => p.id !== id));
-                        }}
-                    />
-                )}
+                <AnimatePresence>
+                    {editingProject && (
+                        <EditProjectModal
+                            project={editingProject}
+                            onClose={() => setEditingProject(null)}
+                            onProjectUpdated={(updated) => {
+                                setProjects(projects.map(p => p.id === updated.id ? updated : p));
+                            }}
+                            onProjectDeleted={(id) => {
+                                setProjects(projects.filter(p => p.id !== id));
+                            }}
+                        />
+                    )}
+                </AnimatePresence>
             </div>
         );
     }

@@ -36,7 +36,7 @@ const initEmailService = async () => {
     }
 };
 
-const sendEmail = async (to, subject, text, html) => {
+const sendEmail = async (to, subject, text, html, attachments = []) => {
     if (!transporter) {
         await initEmailService(); // Try to init if not ready
         if (!transporter) {
@@ -55,6 +55,7 @@ const sendEmail = async (to, subject, text, html) => {
             subject,
             text,
             html,
+            attachments
         });
         return true;
     } catch (error) {

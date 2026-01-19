@@ -2,574 +2,1032 @@ import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useRef } from 'react';
 import VideoPlayer from '../components/VideoPlayer';
-import ThreeDViewer from '../components/ThreeD/ThreeDViewer';
+import ModelViewer from '../components/ThreeD/ModelViewer';
+import ImageViewer from '../components/ImageViewer';
 import VideoControls from '../components/VideoControls';
 import ActivityPanel from '../components/ActivityPanel';
 import Timeline from '../components/Timeline';
 import ClientLogin from './ClientLogin';
 import ShortcutsModal from '../components/ShortcutsModal';
-import { Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import ViewerTopMenu from '../components/ViewerTopMenu';
+import { Loader2, ChevronLeft, ChevronRight, MessageSquare } from 'lucide-react';
 import { useMobileDetection } from '../components/MobileGuard';
 import io from 'socket.io-client';
+import FloatingPanelContainer from '../components/FloatingPanelContainer';
+import FixedCommentsPanel from '../components/FixedCommentsPanel';
+import VideoImageToolbar from '../components/VideoImageToolbar';
+import { AnimatePresence, motion } from 'framer-motion';
 
 const ClientReview = () => {
-  const { token } = useParams();
-  const [socket, setSocket] = useState(null);
-  const [project, setProject] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [status, setStatus] = useState(null);
-  const [guestName, setGuestName] = useState(localStorage.getItem('clientName') || '');
-  const [hasAccess, setHasAccess] = useState(!!localStorage.getItem('clientName'));
+    const { token } = useParams();
+    const [socket, setSocket] = useState(null);
+    const [project, setProject] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [status, setStatus] = useState(null);
+    const [guestName, setGuestName] = useState(localStorage.getItem('clientName') || '');
+    const [hasAccess, setHasAccess] = useState(!!localStorage.getItem('clientName'));
 
-  // Player State
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [seekTime, setSeekTime] = useState(null);
-  const [pendingAnnotations, setPendingAnnotations] = useState([]);
-  const [viewingAnnotation, setViewingAnnotation] = useState(null);
-  const [isDrawingTrigger, setIsDrawingTrigger] = useState(false);
-  const [highlightedCommentId, setHighlightedCommentId] = useState(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [volume, setVolume] = useState(() => {
-    const saved = localStorage.getItem('pref_volume');
-    return saved !== null ? parseFloat(saved) : 1;
-  });
-  const [loop, setLoop] = useState(false);
-  const [playbackRate, setPlaybackRate] = useState(() => {
-    const saved = localStorage.getItem('pref_rate');
-    return saved !== null ? parseFloat(saved) : 1;
-  });
-  const [showMobileComments, setShowMobileComments] = useState(false);
-  const [mobileRightPanelDocked, setMobileRightPanelDocked] = useState(false);
-  const [rangeDuration, setRangeDuration] = useState(null);
-  // Add Selection Range State for persistence
-  const [selectionRange, setSelectionRange] = useState(null); // { start, end }
+    // Player State
+    const [currentTime, setCurrentTime] = useState(0);
+    const [duration, setDuration] = useState(0);
+    const [seekTime, setSeekTime] = useState(null);
+    const [pendingAnnotations, setPendingAnnotations] = useState([]);
+    const [viewingAnnotation, setViewingAnnotation] = useState(null);
+    const [isDrawingTrigger, setIsDrawingTrigger] = useState(false);
+    const [highlightedCommentId, setHighlightedCommentId] = useState(null);
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [volume, setVolume] = useState(() => {
+        const saved = localStorage.getItem('pref_volume');
+        return saved !== null ? parseFloat(saved) : 1;
+    });
+    const [loop, setLoop] = useState(false);
+    const [playbackRate, setPlaybackRate] = useState(() => {
+        const saved = localStorage.getItem('pref_rate');
+        return saved !== null ? parseFloat(saved) : 1;
+    });
+    const [showMobileComments, setShowMobileComments] = useState(false);
+    const [mobileRightPanelDocked, setMobileRightPanelDocked] = useState(false);
+    const [rangeDuration, setRangeDuration] = useState(null);
+    // Add Selection Range State for persistence
+    const [selectionRange, setSelectionRange] = useState(null); // { start, end }
 
-  const [compareVersion, setCompareVersion] = useState(null);
-  const [showShortcuts, setShowShortcuts] = useState(false);
-  const videoPlayerRef = useRef(null);
+    const [compareVersion, setCompareVersion] = useState(null);
+    const [activeVersionIndex, setActiveVersionIndex] = useState(0);
+    const [showShortcuts, setShowShortcuts] = useState(false);
+    const videoPlayerRef = useRef(null);
 
-  const [panelWidth, setPanelWidth] = useState(320); // Default 320px
-  const [mobileVideoHeight, setMobileVideoHeight] = useState('40%');
-  const [isPanelCollapsed, setIsPanelCollapsed] = useState(false); // Local collapse state for logic usage
+    // Image State
+    const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
-  const { isMobile, isLandscape } = useMobileDetection();
+    const [mobileVideoHeight, setMobileVideoHeight] = useState('40%');
+    const [isPanelCollapsed, setIsPanelCollapsed] = useState(false); // Used for overlay visibility now
 
-  const isResizing = useRef(false);
+    // Drawing State (controlled from toolbar, passed to player)
+    const [isDrawingMode, setIsDrawingMode] = useState(false);
+    const [drawingTool, setDrawingTool] = useState('pointer');
+    const [drawingColor, setDrawingColor] = useState('#ef4444');
+    const [drawingStrokeWidth, setDrawingStrokeWidth] = useState(5);
 
-  const startResize = (e) => {
-      isResizing.current = true;
-      e.preventDefault();
-      document.addEventListener('mousemove', handleResize);
-      document.addEventListener('mouseup', stopResize);
-      document.addEventListener('touchmove', handleResize);
-      document.addEventListener('touchend', stopResize);
-  };
+    const { isMobile, isLandscape } = useMobileDetection();
 
-  const handleResize = (e) => {
-      if (!isResizing.current) return;
-      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    // Determine active asset based on activeVersionIndex
+    const clientVersions = React.useMemo(() => {
+        if (!project) return [];
+        const videos = (project.videos || []).map(v => ({ ...v, type: 'video' }));
+        const threeD = (project.threeDAssets || []).map(a => ({ ...a, type: '3d' }));
+        const imageBundles = (project.imageBundles || []).map(b => ({ ...b, type: 'image_bundle' }));
+        return [...videos, ...imageBundles, ...threeD];
+    }, [project]);
 
-      if (isMobile && !isLandscape) {
-         const percentage = (clientY / window.innerHeight) * 100;
-         if (percentage > 20 && percentage < 80) setMobileVideoHeight(`${percentage}%`);
-      } else {
-         const newWidth = window.innerWidth - clientX;
-         if (newWidth < 280) {
-             setShowMobileComments(false); // In ClientReview, 'showMobileComments' acts as visibility toggle on mobile logic, but here acts as collapsed on desktop logic if we unify?
-             // Actually, ClientReview uses showMobileComments for visibility on mobile.
-             // For desktop, it renders always unless we add collapse logic.
-             // The original code:
-             // (!isMobile || (isMobile && isLandscape && mobileRightPanelDocked)) ? 'md:relative relative block md:w-80 w-80 ...'
-             // It doesn't have isPanelCollapsed state like App.jsx.
-             // Let's rely on width < 280 closing it?
-             // Or just set width to 0/hidden?
-             // But the logic is: if < 280, close.
-             // ClientReview currently doesn't have a "Open Comments" button on desktop if closed?
-             // App.jsx has one. ClientReview handles it differently.
-             // Let's assume we just clamp min width or if < 280 snap to closed, but we need a way to reopen.
-             // I'll add isPanelCollapsed state above.
-             setIsPanelCollapsed(true);
-             stopResize();
-         } else if (newWidth > 280 && newWidth < 800) {
-             setPanelWidth(newWidth);
-             setIsPanelCollapsed(false);
-         }
-      }
-  };
+    const activeAsset = clientVersions[activeVersionIndex] || null;
+    const assetType = activeAsset?.type || null;
 
-  const stopResize = () => {
-      isResizing.current = false;
-      document.removeEventListener('mousemove', handleResize);
-      document.removeEventListener('mouseup', stopResize);
-      document.removeEventListener('touchmove', handleResize);
-      document.removeEventListener('touchend', stopResize);
-  };
-
-  const fetchProject = async () => {
-    try {
-      const response = await fetch(`/api/client/projects/${token}`);
-      if (!response.ok) {
-        if (response.status === 403) {
-            const data = await response.json();
-            setStatus(data.status); // INTERNAL_REVIEW
-            throw new Error(data.error);
+    const activeComments = React.useMemo(() => {
+        if (!activeAsset) return [];
+        if (assetType === 'image_bundle') {
+            if (activeAsset.images && activeAsset.images[currentImageIndex]) {
+                return activeAsset.images[currentImageIndex].comments || [];
+            }
+            return [];
         }
-        throw new Error('Project not found');
-      }
-      const data = await response.json();
-      setProject(data);
-      setStatus(data.status);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+        return activeAsset.comments || [];
+    }, [activeAsset, assetType, currentImageIndex]);
 
-  useEffect(() => {
-    fetchProject();
-  }, [token]);
+    const isResizing = useRef(false);
 
-  // Socket Connection for Guest
-  useEffect(() => {
-    if (!project) return;
+    // Removed resize logic for legacy panel
 
-    // Connect without auth token (Guest mode)
-    // or pass token in query if needed, but backend check verifies token.
-    // Here we are guest, no JWT.
-    // We can join project room via explicit event.
+    const handleResize = (e) => {
+        if (!isResizing.current) return;
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
 
-    // NOTE: In production behind Nginx, path might be needed.
-    // Development uses proxy.
-    const newSocket = io(window.location.origin, {
-       path: '/socket.io/',
-       transports: ['websocket'],
-       query: { token }
-    });
-
-    newSocket.on('connect', () => {
-       newSocket.emit('join_project', project.id);
-    });
-
-    newSocket.on('COMMENT_ADDED', (data) => {
-        if (data.projectId === project.id) {
-            // Refetch to ensure consistency, or append locally
-             fetchProject();
+        if (isMobile && !isLandscape) {
+            const percentage = (clientY / window.innerHeight) * 100;
+            if (percentage > 20 && percentage < 80) setMobileVideoHeight(`${percentage}%`);
         }
-    });
-
-    setSocket(newSocket);
-
-    return () => {
-        newSocket.disconnect();
     };
-  }, [project?.id]); // Re-connect if project ID changes (unlikely)
 
-  useEffect(() => {
-      const handleGlobalKeyDown = (e) => {
-          if (e.key === '?' && e.shiftKey) {
-              const activeTag = document.activeElement?.tagName?.toLowerCase();
-              if (activeTag === 'input' || activeTag === 'textarea') return;
-              e.preventDefault();
-              setShowShortcuts(prev => !prev);
-          }
-      };
-      window.addEventListener('keydown', handleGlobalKeyDown);
-      return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, []);
+    const stopResize = () => {
+        isResizing.current = false;
+        document.removeEventListener('mousemove', handleResize);
+        document.removeEventListener('mouseup', stopResize);
+        document.removeEventListener('touchmove', handleResize);
+        document.removeEventListener('touchend', stopResize);
+    };
 
-  // Loop Selection Logic
-  useEffect(() => {
-     if (isPlaying && selectionRange && selectionRange.start !== null && selectionRange.end !== null) {
-         // Loop within selection range if playing
-         // Tolerance of 0.1s to prevent glitching at exact boundary
-         // Also handle case where start == end (single point selection, don't loop)
-         if (Math.abs(selectionRange.end - selectionRange.start) > 0.1) {
-             if (currentTime >= selectionRange.end || currentTime < selectionRange.start) {
-                  videoPlayerRef.current?.seek(selectionRange.start);
-             }
-         }
-     }
-  }, [currentTime, isPlaying, selectionRange]);
+    const fetchProject = async () => {
+        try {
+            const response = await fetch(`/api/client/projects/${token}`);
+            if (!response.ok) {
+                if (response.status === 403) {
+                    const data = await response.json();
+                    setStatus(data.status); // INTERNAL_REVIEW
+                    throw new Error(data.error);
+                }
+                throw new Error('Project not found');
+            }
+            const data = await response.json();
+            setProject(data);
+            setStatus(data.status);
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
 
-  const handleLogin = (name) => {
-    localStorage.setItem('clientName', name);
-    setGuestName(name);
-    setHasAccess(true);
-  };
+    useEffect(() => {
+        fetchProject();
+    }, [token]);
 
-  const handleTriggerDrawing = () => {
-      setIsDrawingTrigger(true);
-      setTimeout(() => setIsDrawingTrigger(false), 100);
-  };
+    // Set default version to latest when project loads
+    useEffect(() => {
+        if (project) {
+            // Assuming versions are ordered chronologically, last one is latest.
+            // But we need to check if 'clientVersions' is available yet?
+            // clientVersions is memoized on project.
+            const totalVersions = (project.videos || []).length + (project.imageBundles || []).length + (project.threeDAssets || []).length;
+            if (totalVersions > 0) {
+                setActiveVersionIndex(totalVersions - 1);
+            }
+        }
+    }, [project]);
 
-  const handleInputFocus = () => {
-      if (videoPlayerRef.current && isPlaying) {
-          videoPlayerRef.current.pause();
-      }
-  };
+    // Socket Connection for Guest
+    useEffect(() => {
+        if (!project) return;
 
-  const handleStepFrame = (frames) => {
-      if (!videoPlayerRef.current || !activeAsset) return;
-      const frameDuration = 1 / (activeAsset.frameRate || 24);
-      const newTime = currentTime + (frames * frameDuration);
-      videoPlayerRef.current.seek(Math.max(0, Math.min(newTime, duration)));
-      videoPlayerRef.current.pause();
-  };
+        const newSocket = io(window.location.origin, {
+            path: '/socket.io/',
+            transports: ['websocket'],
+            query: { token }
+        });
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
-      </div>
-    );
-  }
+        newSocket.on('connect', () => {
+            newSocket.emit('join_project', project.id);
+        });
 
-  // Handle specific status errors
-  if (status === 'INTERNAL_REVIEW') {
-      return (
-        <div className="min-h-screen bg-background flex items-center justify-center p-4">
-            <div className="bg-card border border-border rounded-lg shadow-lg p-8 max-w-md w-full text-center">
-                <h1 className="text-xl font-bold text-foreground mb-4">Access Denied</h1>
-                <p className="text-muted-foreground">
-                    Reviews have not started for this project yet. Please check back later.
-                </p>
+        newSocket.on('COMMENT_ADDED', (data) => {
+            if (data.projectId === project.id) {
+                fetchProject();
+            }
+        });
+
+        setSocket(newSocket);
+
+        return () => {
+            newSocket.disconnect();
+        };
+    }, [project?.id]);
+
+    useEffect(() => {
+        const handleGlobalKeyDown = (e) => {
+            if (e.key === '?' && e.shiftKey) {
+                const activeTag = document.activeElement?.tagName?.toLowerCase();
+                if (activeTag === 'input' || activeTag === 'textarea') return;
+                e.preventDefault();
+                setShowShortcuts(prev => !prev);
+            }
+        };
+        window.addEventListener('keydown', handleGlobalKeyDown);
+        return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+    }, []);
+
+    // Loop Selection Logic
+    useEffect(() => {
+        if (isPlaying && selectionRange && selectionRange.start !== null && selectionRange.end !== null) {
+            if (Math.abs(selectionRange.end - selectionRange.start) > 0.1) {
+                if (currentTime >= selectionRange.end || currentTime < selectionRange.start) {
+                    videoPlayerRef.current?.seek(selectionRange.start);
+                }
+            }
+        }
+    }, [currentTime, isPlaying, selectionRange]);
+
+    const handleLogin = (name) => {
+        localStorage.setItem('clientName', name);
+        setGuestName(name);
+        setHasAccess(true);
+    };
+
+    const handleTriggerDrawing = () => {
+        setIsDrawingTrigger(true);
+        setTimeout(() => setIsDrawingTrigger(false), 100);
+    };
+
+    const [pendingSubmission, setPendingSubmission] = useState(null);
+
+    const activityPanelRef = useRef(null);
+
+
+
+    const handleReviewSubmit = (content, image) => {
+        // Force open panel if closed
+        if (!isMobile) {
+            setIsPanelCollapsed(false);
+        } else {
+            if (isLandscape) setMobileRightPanelDocked(true);
+            else setShowMobileComments(true);
+        }
+
+        // Queue submission
+        setPendingSubmission({ content, image });
+    };
+
+    const handleAnnotationAdded = () => {
+        // Open panel
+        if (!isMobile) {
+            setIsPanelCollapsed(false);
+        } else {
+            if (isLandscape) setMobileRightPanelDocked(true);
+            else setShowMobileComments(true);
+        }
+
+        // Focus input
+        setTimeout(() => {
+            if (activityPanelRef.current?.focusInput) {
+                activityPanelRef.current.focusInput();
+            }
+        }, 50);
+    };
+
+    const handleInputFocus = () => {
+        if (videoPlayerRef.current && isPlaying) {
+            videoPlayerRef.current.pause();
+        }
+    };
+
+    const handleStepFrame = (frames) => {
+        if (!videoPlayerRef.current || !activeAsset) return;
+        const frameDuration = 1 / (activeAsset.frameRate || 24);
+        const newTime = currentTime + (frames * frameDuration);
+        videoPlayerRef.current.seek(Math.max(0, Math.min(newTime, duration)));
+        videoPlayerRef.current.pause();
+    };
+
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-background flex items-center justify-center">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
             </div>
-        </div>
-      );
-  }
+        );
+    }
 
-  if (error) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
-        <div className="bg-destructive/10 border border-destructive rounded-lg p-6 text-destructive text-center">
-          <p className="font-medium">{error}</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!hasAccess) {
-    return <ClientLogin onLogin={handleLogin} />;
-  }
-
-  // Determine active asset
-  let activeAsset = null;
-  let assetType = null;
-
-  if (project.videos && project.videos.length > 0) {
-      activeAsset = project.videos[0];
-      assetType = 'video';
-  } else if (project.threeDAssets && project.threeDAssets.length > 0) {
-      activeAsset = project.threeDAssets[0];
-      assetType = '3d';
-  }
-
-  return (
-    <div className="h-[100dvh] flex flex-col bg-background text-foreground">
-      <ShortcutsModal isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
-      {/* Simplified Header */}
-      <div className={`${isMobile && !isLandscape ? 'hidden' : 'flex'} h-16 border-b border-border bg-card px-4 items-center justify-between shrink-0`}>
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-primary rounded flex items-center justify-center text-primary-foreground font-bold">
-            R
-          </div>
-          <h1 className="font-semibold text-lg">{project.name}</h1>
-          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${status === 'ALL_REVIEWS_DONE' ? 'bg-green-500/10 text-green-500' : 'bg-secondary text-secondary-foreground'}`}>
-             {status === 'ALL_REVIEWS_DONE' ? 'Reviews Done (Read-only)' : 'Client Review'}
-          </span>
-        </div>
-        <div className="flex items-center gap-4">
-             {/* Comparison Selector - Only for Video */}
-             {assetType === 'video' && project.videos.length > 1 && (
-                 <select
-                    className="bg-muted text-xs p-1 rounded border-none focus:ring-1 focus:ring-primary"
-                    value={compareVersion || ''}
-                    onChange={(e) => setCompareVersion(e.target.value || null)}
-                 >
-                     <option value="">Single View</option>
-                     {project.videos.filter(v => v.id !== activeAsset.id).map(v => (
-                         <option key={v.id} value={v.filename}>Compare with {v.versionName}</option>
-                     ))}
-                 </select>
-             )}
-
-            <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">Reviewing as <strong>{guestName}</strong></span>
-                <button
-                    onClick={() => { localStorage.removeItem('clientName'); setHasAccess(false); }}
-                    className="text-xs text-primary hover:underline"
-                >
-                    Change Name
-                </button>
+    // Handle specific status errors
+    if (status === 'INTERNAL_REVIEW') {
+        return (
+            <div className="min-h-screen bg-background flex items-center justify-center p-4">
+                <div className="bg-card border border-border rounded-lg shadow-lg p-8 max-w-md w-full text-center">
+                    <h1 className="text-xl font-bold text-foreground mb-4">Access Denied</h1>
+                    <p className="text-muted-foreground">
+                        Reviews have not started for this project yet. Please check back later.
+                    </p>
+                </div>
             </div>
-        </div>
-      </div>
+        );
+    }
 
-      {/* Main Content */}
-      <div className={`flex-1 overflow-hidden flex w-full relative ${isMobile && !isLandscape ? 'flex-col' : 'flex-row'}`}>
-        {activeAsset ? (
-          <>
-             {/* Mobile Landscape Comments Toggle (Right) */}
-             {isMobile && isLandscape && (
-                <button
-                  onClick={() => setMobileRightPanelDocked(!mobileRightPanelDocked)}
-                  className={`fixed right-0 top-1/2 -translate-y-1/2 z-50 p-2 bg-black/50 text-white rounded-l-lg border-y border-l border-white/20 hover:bg-black/70 transition-transform ${mobileRightPanelDocked ? '-translate-x-[320px]' : ''}`}
-                  title="Toggle Comments"
-                >
-                   {mobileRightPanelDocked ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
-                </button>
-             )}
+    if (error) {
+        return (
+            <div className="min-h-screen bg-background flex items-center justify-center p-4">
+                <div className="bg-destructive/10 border border-destructive rounded-lg p-6 text-destructive text-center">
+                    <p className="font-medium">{error}</p>
+                </div>
+            </div>
+        );
+    }
 
-             <div
-                 className={`${isMobile && !isLandscape ? (showMobileComments ? '' : 'flex-1') : 'flex-1'} flex flex-col min-w-0 bg-black relative min-h-0 transition-all duration-300`}
-                 style={isMobile && !isLandscape && showMobileComments ? { height: mobileVideoHeight } : {}}
-             >
-                 <div className="flex-1 relative flex items-center justify-center min-h-0 p-4">
-                    {assetType === 'video' ? (
-                        <VideoPlayer
-                            ref={videoPlayerRef}
-                            src={`/api/media/${activeAsset.filename}`}
-                            compareSrc={compareVersion ? `/api/media/${compareVersion}` : null}
-                            onTimeUpdate={setCurrentTime}
-                            onDurationChange={setDuration}
-                            seekTo={seekTime}
-                            onAnnotationSave={(data) => setPendingAnnotations(data)}
-                            viewingAnnotation={viewingAnnotation}
-                            isDrawingModeTrigger={isDrawingTrigger}
-                            onUserPlay={() => {
-                                setViewingAnnotation(null);
-                                setHighlightedCommentId(null);
-                            }}
-                            isGuest={true}
-                            guestName={guestName}
-                            isReadOnly={status === 'ALL_REVIEWS_DONE'}
-                        />
-                    ) : (
-                        <ThreeDViewer
-                            ref={videoPlayerRef}
-                            src={`/api/media/${activeAsset.filename}`}
-                            onAnnotationSave={(data) => setPendingAnnotations(data)}
-                            viewingAnnotation={viewingAnnotation}
-                            isDrawingModeTrigger={isDrawingTrigger}
-                            onCameraInteractionStart={() => setViewingAnnotation(null)}
-                        />
-                    )}
-                 </div>
-                 {assetType === 'video' && (
-                     <>
-                        <Timeline
-                            currentTime={currentTime}
-                            duration={duration || 100}
-                            selectionRange={selectionRange}
-                            onSeek={(t, comment) => {
-                                videoPlayerRef.current?.seek(t);
-                                if (comment) {
-                                    setViewingAnnotation(comment.annotation ? JSON.parse(comment.annotation) : null);
-                                    setHighlightedCommentId(comment.id);
-                                    // Set range duration if comment has one
-                                    if (comment.duration) setRangeDuration(comment.duration);
-                                } else {
-                                    setViewingAnnotation(null);
-                                    setHighlightedCommentId(null);
-                                }
-                            }}
-                            onRangeChange={(start, end) => {
-                                if (start === null && end === null) {
+    if (!hasAccess) {
+        return <ClientLogin onLogin={handleLogin} />;
+    }
+
+    return (
+        <div className="h-[100dvh] flex flex-col bg-background text-foreground">
+            <ShortcutsModal isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
+
+            {/* Main Content */}
+            <div className={`flex-1 overflow-hidden flex w-full relative ${isMobile && !isLandscape ? 'flex-col' : ''}`}>
+                {activeAsset ? (
+                    <>
+                        {/* Mobile Landscape Comments Toggle (Right) */}
+                        {isMobile && isLandscape && (
+                            <button
+                                onClick={() => setMobileRightPanelDocked(!mobileRightPanelDocked)}
+                                className={`fixed right-0 top-1/2 -translate-y-1/2 z-50 p-2 bg-black/50 text-white rounded-l-lg border-y border-l border-white/20 hover:bg-black/70 transition-transform ${mobileRightPanelDocked ? '-translate-x-[320px]' : ''}`}
+                                title="Toggle Comments"
+                            >
+                                {mobileRightPanelDocked ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+                            </button>
+                        )}
+
+                        <div
+                            className={`${isMobile && !isLandscape ? (showMobileComments ? '' : 'flex-1') : (assetType === '3d' ? 'w-full h-full absolute inset-0' : 'flex-1 h-full')} flex flex-col min-w-0 bg-black relative min-h-0 transition-all duration-300`}
+                            style={isMobile && !isLandscape && showMobileComments ? { height: mobileVideoHeight } : {}}
+                        >
+                            {/* Top Controls: Burger Menu */}
+                            <ViewerTopMenu
+                                project={{ ...project, versions: clientVersions }}
+                                activeVersionIndex={activeVersionIndex}
+                                onVersionChange={(idx) => {
+                                    setActiveVersionIndex(idx);
+                                    setCompareVersion(null);
                                     setSelectionRange(null);
                                     setRangeDuration(null);
-                                } else {
-                                    setSelectionRange({ start, end });
-                                }
-                            }}
-                            onRangeCommit={(start, end) => {
-                                setSelectionRange({ start, end });
-                                setRangeDuration(end - start);
-                                // Pause on range selection done (standard UX for precise comment)
-                                videoPlayerRef.current?.pause();
-                            }}
-                            markers={activeAsset.comments.map(c => ({
-                                id: c.id,
-                                timestamp: c.timestamp,
-                                duration: c.duration,
-                                content: c.content,
-                                annotation: c.annotation,
-                                isResolved: c.isResolved
-                            }))}
-                        />
-                        <VideoControls
-                            isPlaying={isPlaying}
-                            onTogglePlay={() => videoPlayerRef.current?.togglePlay()}
-                            currentTime={currentTime}
-                            duration={duration}
-                            volume={volume}
-                            onVolumeChange={(v) => {
-                                setVolume(v);
-                                localStorage.setItem('pref_volume', v);
-                                videoPlayerRef.current?.setVolume(v);
-                            }}
-                            onFullscreen={() => videoPlayerRef.current?.toggleFullscreen()}
-                            loop={loop}
-                            onToggleLoop={() => setLoop(!loop)}
-                            playbackRate={playbackRate}
-                            onPlaybackRateChange={(rate) => {
-                                setPlaybackRate(rate);
-                                localStorage.setItem('pref_rate', rate);
-                            }}
-                            onToggleComments={() => {
-                                if (isMobile && isLandscape) {
-                                    setMobileRightPanelDocked(!mobileRightPanelDocked);
-                                } else if (!isMobile) {
-                                    // Desktop toggle
-                                    setIsPanelCollapsed(!isPanelCollapsed);
-                                } else {
-                                    setShowMobileComments(!showMobileComments);
-                                }
-                            }}
-                            onStepFrame={handleStepFrame}
-                        />
-                     </>
-                 )}
-             </div>
+                                    setCurrentImageIndex(0);
+                                }}
+                                onRenameVersion={() => { }}
+                                isRenamingVersion={false}
+                                compareVersionIndex={compareVersion ? clientVersions.findIndex(v => v.filename === compareVersion) : null}
+                                onCompareChange={(idx) => {
+                                    if (idx === null || !clientVersions[idx]) setCompareVersion(null);
+                                    else setCompareVersion(clientVersions[idx].filename);
+                                }}
+                                onUpload={() => { }}
+                                uploadingVersion={false}
+                                status={status}
+                                onStatusChange={() => { }}
+                                onShare={() => { }}
+                                isClientReview={true}
+                            />
 
-             {/* Resize Handles */}
-             {(!isPanelCollapsed && !isMobile || (isMobile && isLandscape && mobileRightPanelDocked)) && (
-                <div
-                    className="w-1 cursor-col-resize hover:bg-primary/50 bg-transparent transition-colors z-10 hidden md:block"
-                    onMouseDown={startResize}
-                    onTouchStart={startResize}
-                />
-             )}
-             {(isMobile && !isLandscape && showMobileComments) && (
-                 <div
-                    className="h-1.5 w-full cursor-row-resize bg-border flex items-center justify-center"
-                    onMouseDown={startResize}
-                    onTouchStart={startResize}
-                 >
-                     <div className="w-10 h-1 bg-muted-foreground/30 rounded-full" />
-                 </div>
-            )}
+                            {/* Project Name Overlay */}
+                            <div className="absolute top-4 left-4 z-20 pointer-events-none">
+                                <div className="bg-black/50 backdrop-blur rounded px-3 py-1.5 border border-white/20 text-white shadow-sm">
+                                    <h1 className="font-semibold text-sm">{project.name}</h1>
+                                    <div className="text-[10px] text-white/70">Reviewing as {guestName}</div>
+                                </div>
+                            </div>
 
-             <div
-                 className={`
-                    ${(!isMobile || (isMobile && isLandscape && mobileRightPanelDocked)) ? 'md:relative relative block h-full border-l border-border z-0' : 'relative block w-full bg-background flex flex-col transition-all duration-300'}
+                            <div className="flex-1 relative flex items-center justify-center min-h-0 p-0">
+                                {assetType === 'video' ? (
+                                    <VideoPlayer
+                                        ref={videoPlayerRef}
+                                        src={`/api/media/${activeAsset.filename}`}
+                                        compareSrc={compareVersion ? `/api/media/${compareVersion}` : null}
+                                        onTimeUpdate={setCurrentTime}
+                                        onDurationChange={setDuration}
+                                        seekTo={seekTime}
+                                        onAnnotationSave={(data) => setPendingAnnotations(data)}
+                                        viewingAnnotation={viewingAnnotation}
+                                        isDrawingModeTrigger={isDrawingTrigger}
+                                        onUserPlay={() => {
+                                            setViewingAnnotation(null);
+                                            setHighlightedCommentId(null);
+                                        }}
+                                        isGuest={true}
+                                        guestName={guestName}
+                                        isReadOnly={status === 'ALL_REVIEWS_DONE'}
+                                        onReviewSubmit={handleReviewSubmit}
+                                        onDrawingModeChange={setIsDrawingMode}
+                                    />
+                                ) : assetType === 'image_bundle' ? (
+                                    <ImageViewer
+                                        ref={videoPlayerRef}
+                                        src={activeAsset.images && activeAsset.images.length > 0 ? `/api/media/${activeAsset.images[currentImageIndex].filename}` : ''}
+                                        onNext={() => {
+                                            if (currentImageIndex < (activeAsset.images?.length || 0) - 1) {
+                                                setCurrentImageIndex(currentImageIndex + 1);
+                                                setViewingAnnotation(null);
+                                            }
+                                        }}
+                                        onPrev={() => {
+                                            if (currentImageIndex > 0) {
+                                                setCurrentImageIndex(currentImageIndex - 1);
+                                                setViewingAnnotation(null);
+                                            }
+                                        }}
+                                        hasPrev={currentImageIndex > 0}
+                                        hasNext={currentImageIndex < (activeAsset.images?.length || 0) - 1}
+                                        onAnnotationSave={(data) => setPendingAnnotations(data)}
+                                        viewingAnnotation={viewingAnnotation}
+                                        isDrawingModeTrigger={isDrawingTrigger}
+                                        activeImageIndex={currentImageIndex}
+                                        totalImages={activeAsset.images?.length || 0}
+                                        onReviewSubmit={handleReviewSubmit}
+                                        onDrawingModeChange={setIsDrawingMode}
+                                    />
+                                ) : (
+                                    <ModelViewer
+                                        ref={videoPlayerRef}
+                                        src={`/api/media/${activeAsset.filename}`}
+                                        entryFile={activeAsset.originalName ? activeAsset.originalName.split('::')[1] : null}
+                                        onAnnotationSave={(data) => setPendingAnnotations(data)}
+                                        viewingAnnotation={viewingAnnotation}
+                                        isDrawingModeTrigger={isDrawingTrigger}
+                                        onCameraInteractionStart={() => setViewingAnnotation(null)}
+                                        onTimeUpdate={setCurrentTime}
+                                        onDurationChange={setDuration}
+                                        onReviewSubmit={handleReviewSubmit}
+                                        onAnnotationAdded={handleAnnotationAdded}
+                                        existingComments={activeComments}
+                                        onCommentClick={(time, annotation, id, comment) => {
+                                            // Seek to the animation timecode
+                                            if (videoPlayerRef.current?.seek) {
+                                                videoPlayerRef.current.seek(time);
+                                            }
+
+                                            // Restore camera state if available
+                                            if (comment && comment.cameraState) {
+                                                const state = typeof comment.cameraState === 'string'
+                                                    ? JSON.parse(comment.cameraState)
+                                                    : comment.cameraState;
+                                                videoPlayerRef.current?.setCameraState(state);
+                                            }
+                                            setViewingAnnotation(annotation);
+                                            setHighlightedCommentId(id);
+                                        }}
+                                    />
+                                )}
+                            </div>
+                            {(assetType === 'video' || assetType === 'image_bundle') && (
+                                <VideoImageToolbar
+                                    assetType={assetType === 'image_bundle' ? 'image' : 'video'}
+                                    isPlaying={isPlaying}
+                                    onTogglePlay={() => videoPlayerRef.current?.togglePlay()}
+                                    currentTime={currentTime}
+                                    duration={duration || 1}
+                                    frameRate={activeAsset.frameRate || 24}
+                                    startFrame={0}
+                                    onSeek={(t, comment) => {
+                                        videoPlayerRef.current?.seek(t);
+                                        if (comment) {
+                                            setViewingAnnotation(comment.annotation ? JSON.parse(comment.annotation) : null);
+                                            setHighlightedCommentId(comment.id);
+                                            if (comment.duration) setRangeDuration(comment.duration);
+                                        } else {
+                                            setViewingAnnotation(null);
+                                            setHighlightedCommentId(null);
+                                        }
+                                    }}
+                                    markers={(activeAsset.comments || []).map(c => ({
+                                        id: c.id,
+                                        timestamp: c.timestamp,
+                                        duration: c.duration,
+                                        content: c.content,
+                                        annotation: c.annotation,
+                                        isResolved: c.isResolved,
+                                        user: c.user || c.guestInfo
+                                    }))}
+                                    selectionRange={selectionRange}
+                                    highlightedCommentId={highlightedCommentId}
+                                    volume={volume}
+                                    onVolumeChange={(v) => {
+                                        setVolume(v);
+                                        localStorage.setItem('pref_volume', v);
+                                        videoPlayerRef.current?.setVolume(v);
+                                    }}
+                                    playbackRate={playbackRate}
+                                    onPlaybackRateChange={(rate) => {
+                                        setPlaybackRate(rate);
+                                        localStorage.setItem('pref_rate', rate);
+                                        videoPlayerRef.current?.setPlaybackRate(rate);
+                                    }}
+                                    onFullscreen={() => videoPlayerRef.current?.toggleFullscreen()}
+                                    isCommentsPanelOpen={!isPanelCollapsed}
+                                    onToggleCommentsPanel={() => {
+                                        if (isMobile && isLandscape) {
+                                            setMobileRightPanelDocked(!mobileRightPanelDocked);
+                                        } else if (!isMobile) {
+                                            setIsPanelCollapsed(!isPanelCollapsed);
+                                        } else {
+                                            setShowMobileComments(!showMobileComments);
+                                        }
+                                    }}
+                                    onShowShortcuts={() => setShowShortcuts(true)}
+                                    currentImageIndex={currentImageIndex}
+                                    totalImages={activeAsset.images?.length || 0}
+                                    // Drawing mode props
+                                    isDrawingMode={isDrawingMode}
+                                    onToggleDrawingMode={(mode) => {
+                                        setIsDrawingMode(mode);
+                                        videoPlayerRef.current?.setDrawingMode?.(mode);
+                                    }}
+                                    drawingTool={drawingTool}
+                                    onDrawingToolChange={(tool) => {
+                                        setDrawingTool(tool);
+                                        videoPlayerRef.current?.setDrawingTool?.(tool);
+                                    }}
+                                    drawingColor={drawingColor}
+                                    onDrawingColorChange={(color) => {
+                                        setDrawingColor(color);
+                                        videoPlayerRef.current?.setDrawingColor?.(color);
+                                    }}
+                                    drawingStrokeWidth={drawingStrokeWidth}
+                                    onDrawingStrokeWidthChange={(width) => {
+                                        setDrawingStrokeWidth(width);
+                                        videoPlayerRef.current?.setDrawingStrokeWidth?.(width);
+                                    }}
+                                    onClearAnnotations={() => {
+                                        videoPlayerRef.current?.clearAnnotations?.();
+                                        setPendingAnnotations([]);
+                                    }}
+                                    onUndo={() => videoPlayerRef.current?.undoAnnotation?.()}
+                                    canUndo={videoPlayerRef.current?.getDrawingState?.()?.canUndo || false}
+                                    onSend={() => videoPlayerRef.current?.sendAnnotations?.()}
+                                    hasDrawingChanges={videoPlayerRef.current?.getDrawingState?.()?.hasAnnotations || false}
+                                />
+                            )}
+                        </div>
+
+                        {/* Comments Panel - Fixed for video/image, Floating for 3D */}
+                        <div
+                            className={`
+                    ${(!isMobile || (isMobile && isLandscape && mobileRightPanelDocked))
+                                    ? (assetType === '3d'
+                                        ? 'fixed inset-0 pointer-events-none z-40'
+                                        : `h-full ${!isPanelCollapsed ? 'w-auto' : 'w-0'} flex flex-col overflow-hidden transition-all duration-300 shrink-0`)
+                                    : 'relative block w-full bg-background flex flex-col transition-all duration-300'}
                     ${(isMobile && !isLandscape) ? (showMobileComments ? 'flex-1' : 'h-0 overflow-hidden') : ''}
-                    ${isPanelCollapsed ? 'w-0 overflow-hidden' : ''}
                     ${(isMobile && isLandscape && !mobileRightPanelDocked) ? 'hidden' : ''}
                  `}
-                 style={(!isMobile || (isMobile && isLandscape && mobileRightPanelDocked)) && !isPanelCollapsed ? { width: panelWidth } : {}}
-             >
-                <ActivityPanel
-                    projectId={project.id}
-                    videoId={assetType === 'video' ? activeAsset.id : null}
-                    threeDAssetId={assetType === '3d' ? activeAsset.id : null}
-                    comments={activeAsset.comments || []}
-                    currentTime={currentTime}
-                    rangeDuration={rangeDuration}
-                    selectionStart={selectionRange ? selectionRange.start : null}
-                    pendingAnnotations={pendingAnnotations}
-                    getAnnotations={() => videoPlayerRef.current?.getAnnotations()}
-                    getCameraState={() => videoPlayerRef.current?.getCameraState ? videoPlayerRef.current.getCameraState() : null}
-                    onClearAnnotations={() => {
-                        setPendingAnnotations([]);
-                        videoPlayerRef.current?.clearAnnotations();
-                        setRangeDuration(null);
-                        setSelectionRange(null);
-                    }}
-                    onCommentClick={(time, annotation, id, comment) => {
-                        videoPlayerRef.current?.seek(time);
-                        setViewingAnnotation(annotation);
-                        setHighlightedCommentId(id);
-                        setShowMobileComments(false);
+                        >
+                            {(!isMobile || (isMobile && isLandscape && mobileRightPanelDocked)) ? (
+                                <div className={`${assetType === '3d' ? 'pointer-events-auto' : 'h-full'}`}>
+                                    <AnimatePresence mode="wait">
+                                        {/* 3D: FloatingPanelContainer */}
+                                        {!isPanelCollapsed && assetType === '3d' && (
+                                            <FloatingPanelContainer
+                                                key="panel-3d"
+                                                layoutId="comments-panel"
+                                                onClose={() => setIsPanelCollapsed(true)}
+                                            >
+                                                <ActivityPanel
+                                                    ref={activityPanelRef}
+                                                    projectId={project.id}
+                                                    videoId={null}
+                                                    imageId={null}
+                                                    threeDAssetId={activeAsset.id}
+                                                    comments={activeComments}
+                                                    currentTime={currentTime}
+                                                    rangeDuration={rangeDuration}
+                                                    selectionStart={selectionRange ? selectionRange.start : null}
+                                                    pendingAnnotations={pendingAnnotations}
+                                                    getAnnotations={() => videoPlayerRef.current?.getAnnotations()}
+                                                    getScreenshot={(options) => videoPlayerRef.current?.getScreenshot(options)}
+                                                    getCameraState={() => videoPlayerRef.current?.getCameraState ? videoPlayerRef.current.getCameraState() : null}
+                                                    getHotspots={() => videoPlayerRef.current?.getHotspots ? videoPlayerRef.current.getHotspots() : null}
+                                                    onClearAnnotations={() => {
+                                                        setPendingAnnotations([]);
+                                                        videoPlayerRef.current?.clearAnnotations();
+                                                        setRangeDuration(null);
+                                                        setSelectionRange(null);
+                                                    }}
+                                                    onCommentClick={(time, annotation, id, comment) => {
+                                                        if (videoPlayerRef.current?.seek) {
+                                                            videoPlayerRef.current.seek(time);
+                                                        }
+                                                        if (comment && comment.cameraState) {
+                                                            const state = typeof comment.cameraState === 'string'
+                                                                ? JSON.parse(comment.cameraState)
+                                                                : comment.cameraState;
+                                                            videoPlayerRef.current?.setCameraState(state);
+                                                        }
+                                                        setViewingAnnotation(annotation);
+                                                        setHighlightedCommentId(id);
+                                                    }}
+                                                    highlightedCommentId={highlightedCommentId}
+                                                    onCommentAdded={(newComment) => {
+                                                        const newProject = { ...project };
+                                                        const videosCount = (project.videos || []).length;
+                                                        const bundlesCount = (project.imageBundles || []).length;
+                                                        const threeDIndex = activeVersionIndex - videosCount - bundlesCount;
+                                                        const targetCommentsList = newProject.threeDAssets[threeDIndex].comments;
+                                                        if (newComment.parentId) {
+                                                            const addReply = (comments) => {
+                                                                for (let c of comments) {
+                                                                    if (c.id === newComment.parentId) {
+                                                                        if (!c.replies) c.replies = [];
+                                                                        c.replies.push(newComment);
+                                                                        return true;
+                                                                    }
+                                                                    if (c.replies && c.replies.length > 0) {
+                                                                        if (addReply(c.replies)) return true;
+                                                                    }
+                                                                }
+                                                                return false;
+                                                            };
+                                                            addReply(targetCommentsList);
+                                                        } else {
+                                                            targetCommentsList.push(newComment);
+                                                        }
+                                                        setProject(newProject);
+                                                    }}
+                                                    onCommentUpdated={(updatedComment) => {
+                                                        const newProject = { ...project };
+                                                        const videosCount = (project.videos || []).length;
+                                                        const bundlesCount = (project.imageBundles || []).length;
+                                                        const threeDIndex = activeVersionIndex - videosCount - bundlesCount;
+                                                        const targetCommentsList = newProject.threeDAssets[threeDIndex].comments;
+                                                        const updateInTree = (comments) => {
+                                                            for (let i = 0; i < comments.length; i++) {
+                                                                if (comments[i].id === updatedComment.id) {
+                                                                    comments[i] = { ...updatedComment, replies: comments[i].replies };
+                                                                    return true;
+                                                                }
+                                                                if (comments[i].replies) {
+                                                                    if (updateInTree(comments[i].replies)) return true;
+                                                                }
+                                                            }
+                                                            return false;
+                                                        };
+                                                        updateInTree(targetCommentsList || []);
+                                                        setProject(newProject);
+                                                    }}
+                                                    onCommentDeleted={(commentId) => {
+                                                        const newProject = { ...project };
+                                                        const videosCount = (project.videos || []).length;
+                                                        const bundlesCount = (project.imageBundles || []).length;
+                                                        const threeDIndex = activeVersionIndex - videosCount - bundlesCount;
+                                                        const targetCommentsList = newProject.threeDAssets[threeDIndex].comments;
+                                                        const deleteFromTree = (comments) => {
+                                                            const index = comments.findIndex(c => c.id === commentId);
+                                                            if (index !== -1) {
+                                                                comments.splice(index, 1);
+                                                                return true;
+                                                            }
+                                                            for (let c of comments) {
+                                                                if (c.replies && deleteFromTree(c.replies)) return true;
+                                                            }
+                                                            return false;
+                                                        };
+                                                        deleteFromTree(targetCommentsList || []);
+                                                        setProject(newProject);
+                                                    }}
+                                                    onToggleDrawing={handleTriggerDrawing}
+                                                    isGuest={true}
+                                                    guestName={guestName}
+                                                    clientToken={token}
+                                                    isReadOnly={status === 'ALL_REVIEWS_DONE'}
+                                                    onClose={() => setIsPanelCollapsed(true)}
+                                                    onCollapse={() => setIsPanelCollapsed(true)}
+                                                    onInputFocus={handleInputFocus}
+                                                    pendingSubmission={pendingSubmission}
+                                                    onSubmissionComplete={() => setPendingSubmission(null)}
+                                                />
+                                            </FloatingPanelContainer>
+                                        )}
 
-                        // If 3D, restore camera
-                        if (assetType === '3d' && comment && comment.cameraState) {
-                            videoPlayerRef.current?.setCameraState(comment.cameraState);
-                        }
+                                        {/* Video/Image: FixedCommentsPanel */}
+                                        {!isPanelCollapsed && assetType !== '3d' && (
+                                            <FixedCommentsPanel
+                                                key="panel-2d"
+                                                isOpen={!isPanelCollapsed}
+                                                onClose={() => setIsPanelCollapsed(true)}
+                                                width={350}
+                                            >
+                                                <ActivityPanel
+                                                    ref={activityPanelRef}
+                                                    projectId={project.id}
+                                                    videoId={assetType === 'video' ? activeAsset.id : null}
+                                                    imageId={assetType === 'image_bundle' && activeAsset.images && activeAsset.images[currentImageIndex] ? activeAsset.images[currentImageIndex].id : null}
+                                                    threeDAssetId={null}
+                                                    comments={activeComments}
+                                                    currentTime={currentTime}
+                                                    rangeDuration={rangeDuration}
+                                                    selectionStart={selectionRange ? selectionRange.start : null}
+                                                    pendingAnnotations={pendingAnnotations}
+                                                    getAnnotations={() => videoPlayerRef.current?.getAnnotations()}
+                                                    getScreenshot={(options) => videoPlayerRef.current?.getScreenshot(options)}
+                                                    getCameraState={() => null}
+                                                    getHotspots={() => null}
+                                                    onClearAnnotations={() => {
+                                                        setPendingAnnotations([]);
+                                                        videoPlayerRef.current?.clearAnnotations();
+                                                        setRangeDuration(null);
+                                                        setSelectionRange(null);
+                                                    }}
+                                                    onCommentClick={(time, annotation, id, comment) => {
+                                                        if (assetType === 'video') {
+                                                            videoPlayerRef.current?.seek(time);
+                                                        }
+                                                        setViewingAnnotation(annotation);
+                                                        setHighlightedCommentId(id);
+                                                        const findComment = (comments) => {
+                                                            for (let c of comments) {
+                                                                if (c.id === id) return c;
+                                                                if (c.replies) {
+                                                                    const found = findComment(c.replies);
+                                                                    if (found) return found;
+                                                                }
+                                                            }
+                                                            return null;
+                                                        };
+                                                        const target = findComment(activeComments);
+                                                        if (target && target.duration) {
+                                                            setSelectionRange({ start: target.timestamp, end: target.timestamp + target.duration });
+                                                            setRangeDuration(target.duration);
+                                                        } else {
+                                                            setSelectionRange(null);
+                                                            setRangeDuration(null);
+                                                        }
+                                                    }}
+                                                    highlightedCommentId={highlightedCommentId}
+                                                    onCommentAdded={(newComment) => {
+                                                        const newProject = { ...project };
+                                                        const videosCount = (project.videos || []).length;
+                                                        const bundlesCount = (project.imageBundles || []).length;
+                                                        let targetCommentsList;
+                                                        if (activeVersionIndex < videosCount) {
+                                                            targetCommentsList = newProject.videos[activeVersionIndex].comments;
+                                                        } else {
+                                                            const bundleIndex = activeVersionIndex - videosCount;
+                                                            if (!newProject.imageBundles[bundleIndex].images[currentImageIndex].comments) {
+                                                                newProject.imageBundles[bundleIndex].images[currentImageIndex].comments = [];
+                                                            }
+                                                            targetCommentsList = newProject.imageBundles[bundleIndex].images[currentImageIndex].comments;
+                                                        }
+                                                        if (newComment.parentId) {
+                                                            const addReply = (comments) => {
+                                                                for (let c of comments) {
+                                                                    if (c.id === newComment.parentId) {
+                                                                        if (!c.replies) c.replies = [];
+                                                                        c.replies.push(newComment);
+                                                                        return true;
+                                                                    }
+                                                                    if (c.replies && c.replies.length > 0) {
+                                                                        if (addReply(c.replies)) return true;
+                                                                    }
+                                                                }
+                                                                return false;
+                                                            };
+                                                            addReply(targetCommentsList);
+                                                        } else {
+                                                            targetCommentsList.push(newComment);
+                                                        }
+                                                        setProject(newProject);
+                                                    }}
+                                                    onCommentUpdated={(updatedComment) => {
+                                                        const newProject = { ...project };
+                                                        const videosCount = (project.videos || []).length;
+                                                        const bundlesCount = (project.imageBundles || []).length;
+                                                        let targetCommentsList;
+                                                        if (activeVersionIndex < videosCount) {
+                                                            targetCommentsList = newProject.videos[activeVersionIndex].comments;
+                                                        } else {
+                                                            const bundleIndex = activeVersionIndex - videosCount;
+                                                            targetCommentsList = newProject.imageBundles[bundleIndex].images[currentImageIndex].comments;
+                                                        }
+                                                        const updateInTree = (comments) => {
+                                                            for (let i = 0; i < comments.length; i++) {
+                                                                if (comments[i].id === updatedComment.id) {
+                                                                    comments[i] = { ...updatedComment, replies: comments[i].replies };
+                                                                    return true;
+                                                                }
+                                                                if (comments[i].replies) {
+                                                                    if (updateInTree(comments[i].replies)) return true;
+                                                                }
+                                                            }
+                                                            return false;
+                                                        };
+                                                        updateInTree(targetCommentsList || []);
+                                                        setProject(newProject);
+                                                    }}
+                                                    onCommentDeleted={(commentId) => {
+                                                        const newProject = { ...project };
+                                                        const videosCount = (project.videos || []).length;
+                                                        const bundlesCount = (project.imageBundles || []).length;
+                                                        let targetCommentsList;
+                                                        if (activeVersionIndex < videosCount) {
+                                                            targetCommentsList = newProject.videos[activeVersionIndex].comments;
+                                                        } else {
+                                                            const bundleIndex = activeVersionIndex - videosCount;
+                                                            targetCommentsList = newProject.imageBundles[bundleIndex].images[currentImageIndex].comments;
+                                                        }
+                                                        const deleteFromTree = (comments) => {
+                                                            const index = comments.findIndex(c => c.id === commentId);
+                                                            if (index !== -1) {
+                                                                comments.splice(index, 1);
+                                                                return true;
+                                                            }
+                                                            for (let c of comments) {
+                                                                if (c.replies && deleteFromTree(c.replies)) return true;
+                                                            }
+                                                            return false;
+                                                        };
+                                                        deleteFromTree(targetCommentsList || []);
+                                                        setProject(newProject);
+                                                    }}
+                                                    onToggleDrawing={handleTriggerDrawing}
+                                                    isGuest={true}
+                                                    guestName={guestName}
+                                                    clientToken={token}
+                                                    isReadOnly={status === 'ALL_REVIEWS_DONE'}
+                                                    onClose={() => setIsPanelCollapsed(true)}
+                                                    onCollapse={() => setIsPanelCollapsed(true)}
+                                                    onInputFocus={handleInputFocus}
+                                                    pendingSubmission={pendingSubmission}
+                                                    onSubmissionComplete={() => setPendingSubmission(null)}
+                                                />
+                                            </FixedCommentsPanel>
+                                        )}
 
-                        // Find comment to see if it has a duration
-                        const findComment = (comments) => {
-                             for (let c of comments) {
-                                 if (c.id === id) return c;
-                                 if (c.replies) {
-                                     const found = findComment(c.replies);
-                                     if (found) return found;
-                                 }
-                             }
-                             return null;
-                         };
-                         const target = findComment(activeAsset.comments);
-                         if (target && target.duration) {
-                             setSelectionRange({ start: target.timestamp, end: target.timestamp + target.duration });
-                             setRangeDuration(target.duration);
-                         } else {
-                             setSelectionRange(null);
-                             setRangeDuration(null);
-                         }
-                    }}
-                    highlightedCommentId={highlightedCommentId}
-                    onCommentAdded={(newComment) => {
-                        if (assetType === 'video') {
-                            const updatedVideos = [...project.videos];
-                            updatedVideos[0].comments.push(newComment);
-                            setProject({ ...project, videos: updatedVideos });
-                        } else if (assetType === '3d') {
-                            const updatedAssets = [...project.threeDAssets];
-                            updatedAssets[0].comments.push(newComment);
-                            setProject({ ...project, threeDAssets: updatedAssets });
-                        }
-                    }}
-                    onCommentUpdated={(updatedComment) => {
-                         let updatedList = assetType === 'video' ? [...project.videos] : [...project.threeDAssets];
-                         const idx = updatedList[0].comments.findIndex(c => c.id === updatedComment.id);
-                         if (idx !== -1) {
-                             updatedList[0].comments[idx] = updatedComment;
-                             if (assetType === 'video') {
-                                 setProject({ ...project, videos: updatedList });
-                             } else {
-                                 setProject({ ...project, threeDAssets: updatedList });
-                             }
-                         }
-                    }}
-                    onCommentDeleted={(commentId) => {
-                         let updatedList = assetType === 'video' ? [...project.videos] : [...project.threeDAssets];
-                         updatedList[0].comments = updatedList[0].comments.filter(c => c.id !== commentId);
-                         if (assetType === 'video') {
-                             setProject({ ...project, videos: updatedList });
-                         } else {
-                             setProject({ ...project, threeDAssets: updatedList });
-                         }
-                    }}
-                    onToggleDrawing={handleTriggerDrawing}
-                    isGuest={true}
-                    guestName={guestName}
-                    clientToken={token}
-                    isReadOnly={status === 'ALL_REVIEWS_DONE'}
-                    onClose={() => {
-                        if (isMobile && isLandscape) {
-                           setMobileRightPanelDocked(false);
-                        } else if (!isMobile) {
-                            setIsPanelCollapsed(true);
-                        } else {
-                           setShowMobileComments(false);
-                        }
-                    }}
-                    onCollapse={() => setIsPanelCollapsed(true)}
-                    onInputFocus={handleInputFocus}
-                />
-             </div>
-          </>
-        ) : (
-           <div className="flex h-full w-full items-center justify-center text-muted-foreground">
-               No reviewable assets available.
-           </div>
-        )}
-      </div>
-    </div>
-  );
+                                        {/* Collapsed button (3D only - video/image uses toolbar toggle) */}
+                                        {isPanelCollapsed && assetType === '3d' && (
+                                            <motion.button
+                                                key="button"
+                                                layoutId="comments-panel"
+                                                onClick={() => setIsPanelCollapsed(false)}
+                                                className="fixed top-24 right-4 z-50 p-3 bg-primary text-primary-foreground rounded-full shadow-lg hover:bg-primary/90 flex items-center justify-center pointer-events-auto"
+                                                whileHover={{ scale: 1.1 }}
+                                                whileTap={{ scale: 0.9 }}
+                                                initial={{ opacity: 0, scale: 0.5 }}
+                                                animate={{ opacity: 1, scale: 1 }}
+                                                exit={{ opacity: 0, scale: 0.5 }}
+                                                title="Open Comments"
+                                            >
+                                                <MessageSquare size={24} />
+                                            </motion.button>
+                                        )}
+                                    </AnimatePresence>
+                                </div>
+                            ) : (
+                                <ActivityPanel
+                                    ref={activityPanelRef}
+                                    projectId={project.id}
+                                    videoId={assetType === 'video' ? activeAsset.id : null}
+                                    imageId={assetType === 'image_bundle' && activeAsset.images && activeAsset.images[currentImageIndex] ? activeAsset.images[currentImageIndex].id : null}
+                                    threeDAssetId={assetType === '3d' ? activeAsset.id : null}
+                                    comments={activeComments}
+                                    currentTime={currentTime}
+                                    rangeDuration={rangeDuration}
+                                    selectionStart={selectionRange ? selectionRange.start : null}
+                                    pendingAnnotations={pendingAnnotations}
+                                    getAnnotations={() => videoPlayerRef.current?.getAnnotations()}
+                                    getScreenshot={(options) => videoPlayerRef.current?.getScreenshot(options)}
+                                    getCameraState={() => videoPlayerRef.current?.getCameraState ? videoPlayerRef.current.getCameraState() : null}
+                                    getHotspots={() => videoPlayerRef.current?.getHotspots ? videoPlayerRef.current.getHotspots() : null}
+                                    onClearAnnotations={() => {
+                                        setPendingAnnotations([]);
+                                        videoPlayerRef.current?.clearAnnotations();
+                                        setRangeDuration(null);
+                                        setSelectionRange(null);
+                                    }}
+                                    pendingSubmission={pendingSubmission}
+                                    onSubmissionComplete={() => setPendingSubmission(null)}
+                                    onCommentClick={(time, annotation, id, comment) => {
+                                        if (assetType === 'video') {
+                                            videoPlayerRef.current?.seek(time);
+                                        } else if (assetType === '3d' && comment && comment.cameraState) {
+                                            const state = typeof comment.cameraState === 'string'
+                                                ? JSON.parse(comment.cameraState)
+                                                : comment.cameraState;
+                                            videoPlayerRef.current?.setCameraState(state);
+                                        }
+
+                                        setViewingAnnotation(annotation);
+                                        setHighlightedCommentId(id);
+                                        setShowMobileComments(false);
+
+                                        // Find comment to see if it has a duration
+                                        const findComment = (comments) => {
+                                            for (let c of comments) {
+                                                if (c.id === id) return c;
+                                                if (c.replies) {
+                                                    const found = findComment(c.replies);
+                                                    if (found) return found;
+                                                }
+                                            }
+                                            return null;
+                                        };
+                                        const target = findComment(activeComments);
+                                        if (target && target.duration) {
+                                            setSelectionRange({ start: target.timestamp, end: target.timestamp + target.duration });
+                                            setRangeDuration(target.duration);
+                                        } else {
+                                            setSelectionRange(null);
+                                            setRangeDuration(null);
+                                        }
+                                    }}
+                                    highlightedCommentId={highlightedCommentId}
+                                    onCommentAdded={(newComment) => {
+                                        const newProject = { ...project };
+                                        let targetCommentsList;
+
+                                        const videosCount = (project.videos || []).length;
+                                        const bundlesCount = (project.imageBundles || []).length;
+
+                                        if (activeVersionIndex < videosCount) {
+                                            targetCommentsList = newProject.videos[activeVersionIndex].comments;
+                                        } else if (activeVersionIndex < videosCount + bundlesCount) {
+                                            const bundleIndex = activeVersionIndex - videosCount;
+                                            targetCommentsList = newProject.imageBundles[bundleIndex].images[currentImageIndex].comments;
+                                        } else {
+                                            const threeDIndex = activeVersionIndex - videosCount - bundlesCount;
+                                            targetCommentsList = newProject.threeDAssets[threeDIndex].comments;
+                                        }
+
+                                        if (newComment.parentId) {
+                                            const addReply = (comments) => {
+                                                for (let c of comments) {
+                                                    if (c.id === newComment.parentId) {
+                                                        if (!c.replies) c.replies = [];
+                                                        c.replies.push(newComment);
+                                                        return true;
+                                                    }
+                                                    if (c.replies && c.replies.length > 0) {
+                                                        if (addReply(c.replies)) return true;
+                                                    }
+                                                }
+                                                return false;
+                                            };
+                                            addReply(targetCommentsList);
+                                        } else {
+                                            targetCommentsList.push(newComment);
+                                        }
+
+                                        setProject(newProject);
+                                    }}
+                                    onCommentUpdated={(updatedComment) => {
+                                        const newProject = { ...project };
+                                        const videosCount = (project.videos || []).length;
+                                        const bundlesCount = (project.imageBundles || []).length;
+
+                                        let targetCommentsList;
+                                        if (activeVersionIndex < videosCount) {
+                                            targetCommentsList = newProject.videos[activeVersionIndex].comments;
+                                        } else if (activeVersionIndex < videosCount + bundlesCount) {
+                                            const bundleIndex = activeVersionIndex - videosCount;
+                                            targetCommentsList = newProject.imageBundles[bundleIndex].images[currentImageIndex].comments;
+                                        } else {
+                                            const threeDIndex = activeVersionIndex - videosCount - bundlesCount;
+                                            targetCommentsList = newProject.threeDAssets[threeDIndex].comments;
+                                        }
+
+                                        const updateInTree = (comments) => {
+                                            for (let i = 0; i < comments.length; i++) {
+                                                if (comments[i].id === updatedComment.id) {
+                                                    comments[i] = { ...updatedComment, replies: comments[i].replies };
+                                                    return true;
+                                                }
+                                                if (comments[i].replies) {
+                                                    if (updateInTree(comments[i].replies)) return true;
+                                                }
+                                            }
+                                            return false;
+                                        };
+                                        updateInTree(targetCommentsList || []);
+                                        setProject(newProject);
+                                    }}
+                                    onCommentDeleted={(commentId) => {
+                                        const newProject = { ...project };
+                                        const videosCount = (project.videos || []).length;
+                                        const bundlesCount = (project.imageBundles || []).length;
+
+                                        let targetCommentsList;
+                                        if (activeVersionIndex < videosCount) {
+                                            targetCommentsList = newProject.videos[activeVersionIndex].comments;
+                                        } else if (activeVersionIndex < videosCount + bundlesCount) {
+                                            const bundleIndex = activeVersionIndex - videosCount;
+                                            targetCommentsList = newProject.imageBundles[bundleIndex].images[currentImageIndex].comments;
+                                        } else {
+                                            const threeDIndex = activeVersionIndex - videosCount - bundlesCount;
+                                            targetCommentsList = newProject.threeDAssets[threeDIndex].comments;
+                                        }
+
+                                        const deleteFromTree = (comments) => {
+                                            const index = comments.findIndex(c => c.id === commentId);
+                                            if (index !== -1) {
+                                                comments.splice(index, 1);
+                                                return true;
+                                            }
+                                            for (let c of comments) {
+                                                if (c.replies && deleteFromTree(c.replies)) return true;
+                                            }
+                                            return false;
+                                        };
+                                        deleteFromTree(targetCommentsList || []);
+                                        setProject(newProject);
+                                    }}
+                                    onToggleDrawing={handleTriggerDrawing}
+                                    isGuest={true}
+                                    guestName={guestName}
+                                    clientToken={token}
+                                    isReadOnly={status === 'ALL_REVIEWS_DONE'}
+                                    onClose={() => {
+                                        if (isMobile && isLandscape) {
+                                            setMobileRightPanelDocked(false);
+                                        } else if (!isMobile) {
+                                            setIsPanelCollapsed(true);
+                                        } else {
+                                            setShowMobileComments(false);
+                                        }
+                                    }}
+                                    onCollapse={() => setIsPanelCollapsed(true)}
+                                    onInputFocus={handleInputFocus}
+                                />
+                            )}
+                        </div>
+                    </>
+                ) : (
+                    <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                        No reviewable assets available.
+                    </div>
+                )}
+            </div>
+        </div>
+    );
 };
 
 export default ClientReview;

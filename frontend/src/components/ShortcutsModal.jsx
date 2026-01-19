@@ -1,10 +1,10 @@
 import React from 'react';
 import { X, Command, Keyboard } from 'lucide-react';
 
-const ShortcutsModal = ({ isOpen, onClose }) => {
+const ShortcutsModal = ({ isOpen, onClose, mode = 'video' }) => {
     if (!isOpen) return null;
 
-    const shortcuts = [
+    const videoShortcuts = [
         { key: 'Space', desc: 'Play / Pause' },
         { key: '← / →', desc: 'Seek -1s / +1s' },
         { key: 'J / L', desc: 'Seek -10s / +10s' },
@@ -13,6 +13,18 @@ const ShortcutsModal = ({ isOpen, onClose }) => {
         { key: 'Esc', desc: 'Exit Fullscreen / Close Modal' },
         { key: 'Shift + ?', desc: 'Show Shortcuts' },
     ];
+
+    const threeDShortcuts = [
+        { key: 'LMB + Drag', desc: 'Rotate / Orbit' },
+        { key: 'RMB + Drag', desc: 'Pan View' },
+        { key: 'Scroll', desc: 'Zoom In / Out' },
+        { key: 'Double Click', desc: 'Focus on Object' },
+        { key: 'H', desc: 'Reset View (Home)' },
+        { key: 'F', desc: 'Fit to View' },
+        { key: 'Esc', desc: 'Close Modal' },
+    ];
+
+    const shortcuts = mode === '3d' ? threeDShortcuts : videoShortcuts;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>

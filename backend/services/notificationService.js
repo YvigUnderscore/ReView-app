@@ -16,18 +16,17 @@ const prisma = new PrismaClient();
  * @param {number|null} data.projectId - Related Project ID
  * @param {number|null} data.videoId - Related Video ID
  */
-const createAndBroadcast = async (userIds, { type, content, referenceId = null, projectId = null, videoId = null }) => {
+const createAndBroadcast = async (userIds, { type, content, referenceId = null, projectId = null, videoId = null, extraData = {} }) => {
   if (!userIds || userIds.length === 0) return;
 
   // Deduplicate userIds
   const uniqueUserIds = [...new Set(userIds)];
 
   try {
-    // We iterate to create individually so we have the ID for each notification to emit
-    // A bulk create wouldn't return the IDs easily in all DBs/Prisma versions without a subsequent fetch
-    // Given the expected scale (team size), simple loop is acceptable.
     const notifications = await Promise.all(
       uniqueUserIds.map(async (userId) => {
+        // 1. Create In-App Notification (Always, or based on pref? System usually implies always in-app, but let's check basic logic)
+        // Existing logic creates it indiscriminately. We'll keep that for "In-App" history.
         const notification = await prisma.notification.create({
           data: {
             userId,
@@ -39,6 +38,42 @@ const createAndBroadcast = async (userIds, { type, content, referenceId = null, 
             isRead: false
           }
         });
+
+        // 2. Check Preferences for Email
+        // We need to fetch the user's preference for this 'type'.
+        // Default is usually: Email=False (opt-in).
+        const pref = await prisma.notificationPreference.findUnique({
+          where: { userId_type: { userId, type } }
+        });
+
+        const emailEnabled = pref ? pref.email : false; // Default false
+
+        if (emailEnabled) {
+          // Construct Payload for Email
+          // We need more context than just 'content'. We might need project name, slug, etc.
+          // Ideally 'extraData' should be passed in.
+          // If not available, we might assume the consumer of this service passes enough info or we fetch it?
+          // For now, let's assume `extraData` contains what we need (projectName, slugs, etc.)
+          // If extraData is missing, we might record minimal info.
+
+          const payload = JSON.stringify({
+            content,
+            type,
+            referenceId,
+            projectId,
+            videoId,
+            ...extraData
+          });
+
+          await prisma.emailQueue.create({
+            data: {
+              userId,
+              type,
+              payload
+            }
+          });
+        }
+
         return notification;
       })
     );

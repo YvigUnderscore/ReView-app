@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useImperativeHandle } from 'react';
 
-const MentionsInput = ({
+const MentionsInput = React.forwardRef(({
     value,
     onChange,
     placeholder,
@@ -10,13 +10,19 @@ const MentionsInput = ({
     teamMembers = [],
     teamRoles = [],
     onPaste
-}) => {
+}, ref) => {
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [cursorPosition, setCursorPosition] = useState(0);
     const [searchTerm, setSearchTerm] = useState('');
     const [suggestionIndex, setSuggestionIndex] = useState(0);
     const [suggestions, setSuggestions] = useState([]);
     const textareaRef = useRef(null);
+
+    useImperativeHandle(ref, () => ({
+        focus: () => {
+            textareaRef.current?.focus();
+        }
+    }));
 
     // Filter suggestions based on search term
     useEffect(() => {
@@ -137,11 +143,11 @@ const MentionsInput = ({
                         >
                             {item.type === 'member' ? (
                                 <div className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center text-[10px] overflow-hidden">
-                                     {item.avatarPath ? (
-                                         <img src={`/api/media/avatars/${item.avatarPath}`} alt={item.name} className="w-full h-full object-cover"/>
-                                     ) : (
-                                         item.name.substring(0, 2).toUpperCase()
-                                     )}
+                                    {item.avatarPath ? (
+                                        <img src={`/api/media/avatars/${item.avatarPath}`} alt={item.name} className="w-full h-full object-cover" />
+                                    ) : (
+                                        item.name.substring(0, 2).toUpperCase()
+                                    )}
                                 </div>
                             ) : (
                                 <div
@@ -159,6 +165,6 @@ const MentionsInput = ({
             )}
         </div>
     );
-};
+});
 
 export default MentionsInput;
