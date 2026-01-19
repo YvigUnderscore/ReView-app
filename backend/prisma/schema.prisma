@@ -3,7 +3,7 @@
 
 generator client {
   provider      = "prisma-client-js"
-  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x"]
 }
 
 datasource db {
@@ -23,7 +23,7 @@ model User {
   comments  Comment[]
   assignedComments Comment[] @relation("AssignedComments")
 
-  teams     Team[]    @relation("TeamMembers")
+  teamMemberships TeamMembership[]
 
   ownedTeams Team[]   @relation("TeamOwner")
 
@@ -41,6 +41,7 @@ model User {
   uploadedVideos Video[]
   uploadedThreeDAssets ThreeDAsset[]
   uploadedImageBundles ImageBundle[]
+  emailQueue EmailQueue[]
 }
 
 model NotificationPreference {
@@ -48,8 +49,9 @@ model NotificationPreference {
   user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId    Int
   type      String  // MENTION, REPLY, PROJECT, VIDEO, STATUS, TEAM_ADD
-  email     Boolean @default(true)
+  email     Boolean @default(false)
   inApp     Boolean @default(true)
+  discord   Boolean @default(true)
 
   @@unique([userId, type])
 }
@@ -86,7 +88,7 @@ model Team {
   owner     User      @relation("TeamOwner", fields: [ownerId], references: [id])
   ownerId   Int
 
-  members   User[]    @relation("TeamMembers")
+  members   TeamMembership[]
   projects  Project[]
   roles     TeamRole[]
 
@@ -95,6 +97,34 @@ model Team {
 
   storageUsed BigInt @default(0)
   storageLimit BigInt?
+
+  startFrame Int @default(1001)
+
+  // Discord Integration
+  discordWebhookUrl String?
+  discordBotName    String?
+  discordBotAvatar  String?
+  discordTiming     String @default("REALTIME") // REALTIME, GROUPED, HYBRID, HOURLY, MAJOR
+  discordBurnAnnotations Boolean @default(true)
+  discordQueue      DiscordQueue[]
+
+  // Digest Video Settings (null = use global default)
+  digestFps        Int?      // Frames per second
+  digestTransition Float?    // Transition duration in seconds
+  digestPause      Float?    // Pause duration in seconds
+  digestVideoEnabled Boolean @default(true)
+}
+
+model TeamMembership {
+  id        Int      @id @default(autoincrement())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId    Int
+  role      String   @default("MEMBER") // 'OWNER', 'ADMIN', 'MEMBER', 'CLIENT'
+  joinedAt  DateTime @default(now())
+
+  @@unique([userId, teamId])
 }
 
 model Invite {
@@ -209,7 +239,9 @@ model Comment {
   duration   Float?   // Duration of the comment range (if any)
   annotation String?  // JSON string for visual annotations
   cameraState String?  // JSON string for 3D camera state (position, target, etc.)
+  hotspots    String?  // JSON string for 3D hotspots (point, surface, dimension)
   screenshotPath String? // Path to the screenshot file
+  annotationScreenshotPath String? // Path to the burned-in annotation screenshot
   attachmentPath String? // Path to the user uploaded attachment
   isResolved Boolean  @default(false)
   isVisibleToClient Boolean @default(false)
@@ -242,4 +274,24 @@ model Reaction {
 model SystemSetting {
   key   String @id
   value String
+}
+
+model DiscordQueue {
+  id        Int      @id @default(autoincrement())
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId    Int
+  type      String   // COMMENT, STATUS, etc.
+  payload   String   // JSON payload
+  createdAt DateTime @default(now())
+}
+
+model EmailQueue {
+  id        Int      @id @default(autoincrement())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+  type      String   // Notification type
+  payload   String   // JSON payload (stores content, project info, etc.)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }

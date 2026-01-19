@@ -15,7 +15,7 @@ const getVideoMetadata = (filePath) => {
 
             const videoStream = metadata.streams.find(s => s.codec_type === 'video');
             if (!videoStream) {
-                 return resolve({ width: 0, height: 0, aspectRatio: 'Unknown', frameRate: 24.0 });
+                return resolve({ width: 0, height: 0, aspectRatio: 'Unknown', frameRate: 24.0 });
             }
 
             const width = videoStream.width;
@@ -44,14 +44,16 @@ const getVideoMetadata = (filePath) => {
                     if (!isNaN(fps) && fps > 0) frameRate = fps;
                 }
             } else if (videoStream.avg_frame_rate) {
-                 const parts = videoStream.avg_frame_rate.split('/');
-                 if (parts.length === 2) {
-                     const fps = parseFloat(parts[0]) / parseFloat(parts[1]);
-                     if (!isNaN(fps) && fps > 0) frameRate = fps;
-                 }
+                const parts = videoStream.avg_frame_rate.split('/');
+                if (parts.length === 2) {
+                    const fps = parseFloat(parts[0]) / parseFloat(parts[1]);
+                    if (!isNaN(fps) && fps > 0) frameRate = fps;
+                }
             }
 
-            resolve({ width, height, aspectRatio, frameRate });
+            const duration = metadata.format.duration || 0;
+
+            resolve({ width, height, aspectRatio, frameRate, duration });
         });
     });
 };

@@ -1,706 +1,779 @@
 import React, { useRef, useEffect, useState, useCallback, useImperativeHandle, forwardRef } from 'react';
-import { Play, Pause, Volume2, Maximize, Pencil, Square, Circle, MoveRight, Type, Eraser, Highlighter, Check, X, MousePointer, Minus, MessageSquare, CornerUpRight, Spline } from 'lucide-react';
+import { Play, Pause, Volume2, Maximize, Check, X, MessageSquare, Spline } from 'lucide-react';
+import { isPointInShape, moveShape } from '../utils/annotationUtils';
+import { timeToFrame, frameToTime } from '../utils/timeUtils';
+import DrawingToolbar from './DrawingToolbar';
 
-const VideoPlayer = forwardRef(({ src, compareSrc, compareAudioEnabled, onTimeUpdate, onDurationChange, onAnnotationSave, viewingAnnotation, isDrawingModeTrigger, onUserPlay, isGuest, guestName, isReadOnly, onPlayStateChange, loop, playbackRate, frameRate = 24 }, ref) => {
-  const videoRef = useRef(null);
-  const compareVideoRef = useRef(null);
-  const containerRef = useRef(null);
-  const canvasRef = useRef(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [duration, setDuration] = useState(0);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [videoError, setVideoError] = useState(null);
-  const [showFullscreenMessage, setShowFullscreenMessage] = useState(false);
+const VideoPlayer = forwardRef(({ src, compareSrc, compareAudioEnabled, onTimeUpdate, onDurationChange, onAnnotationSave, viewingAnnotation, isDrawingModeTrigger, onUserPlay, isGuest, guestName, isReadOnly, onPlayStateChange, loop, playbackRate, frameRate = 24, onReviewSubmit, onDrawingModeChange }, ref) => {
+    const videoRef = useRef(null);
+    const compareVideoRef = useRef(null);
+    const containerRef = useRef(null);
+    const canvasRef = useRef(null);
+    const wrapperRef = useRef(null);
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [duration, setDuration] = useState(0);
+    const [currentTime, setCurrentTime] = useState(0);
+    const [videoError, setVideoError] = useState(null);
+    const [showFullscreenMessage, setShowFullscreenMessage] = useState(false);
+    const [videoDimensions, setVideoDimensions] = useState(null);
 
-  // Drawing State
-  const [isDrawingMode, setIsDrawingMode] = useState(false);
-  const [tool, setTool] = useState('pencil'); // pencil, rect, circle, arrow, line, text, eraser, highlighter, bubble, curve
-  const [color, setColor] = useState('#ef4444'); // red-500
-  const [strokeWidth, setStrokeWidth] = useState(10);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [startPos, setStartPos] = useState({ x: 0, y: 0 });
-  const [currentAnnotation, setCurrentAnnotation] = useState(null); // The active shape being drawn
-  const [annotations, setAnnotations] = useState([]); // List of shapes for current frame
+    // Drawing State
+    const [isDrawingMode, setIsDrawingMode] = useState(false);
+    const [tool, setTool] = useState('pointer');
+    const [color, setColor] = useState('#ef4444');
+    const [strokeWidth, setStrokeWidth] = useState(7);
+    const [isDrawing, setIsDrawing] = useState(false);
+    const [startPos, setStartPos] = useState({ x: 0, y: 0 });
+    const [lastPos, setLastPos] = useState({ x: 0, y: 0 });
+    const [currentAnnotation, setCurrentAnnotation] = useState(null);
+    const [annotations, setAnnotations] = useState([]);
+    const [draggingAnnotation, setDraggingAnnotation] = useState(null);
+    const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
+    const [hoveredShapeIndex, setHoveredShapeIndex] = useState(-1);
 
-  // Refs for callbacks to avoid effect dependencies
-  const annotationsRef = useRef(annotations);
-  const currentAnnotationRef = useRef(currentAnnotation);
+    // History for Undo/Redo
+    const [history, setHistory] = useState([]);
+    const [historyIndex, setHistoryIndex] = useState(-1);
+    const isUndoing = useRef(false);
 
-  useEffect(() => {
-      annotationsRef.current = annotations;
-  }, [annotations]);
+    // Refs for callbacks
+    const annotationsRef = useRef(annotations);
+    const currentAnnotationRef = useRef(currentAnnotation);
+    const draggingAnnotationRef = useRef(draggingAnnotation);
 
-  useEffect(() => {
-      currentAnnotationRef.current = currentAnnotation;
-  }, [currentAnnotation]);
+    useEffect(() => {
+        annotationsRef.current = annotations;
+    }, [annotations]);
 
-  // Expose methods to parent
-  useImperativeHandle(ref, () => ({
-      getAnnotations: () => {
-          // If user is currently drawing, finish the shape
-          if (isDrawing && currentAnnotation) {
-              return [...annotations, currentAnnotation];
-          }
-          return annotations;
-      },
-      clearAnnotations: () => {
-          setAnnotations([]);
-          setIsDrawingMode(false);
-          setCurrentAnnotation(null);
-          setIsDrawing(false);
-      },
-      seek: (time) => {
-          if (videoRef.current) {
-              videoRef.current.currentTime = time;
-          }
-          if (compareVideoRef.current) {
-              compareVideoRef.current.currentTime = time;
-          }
-      },
-      togglePlay: () => {
-          togglePlay();
-      },
-      pause: () => {
-          if (videoRef.current) {
-              videoRef.current.pause();
-              setIsPlaying(false);
-              if (onPlayStateChange) onPlayStateChange(false);
-          }
-          if (compareVideoRef.current) {
-              compareVideoRef.current.pause();
-          }
-      },
-      toggleFullscreen: () => {
-          if (!document.fullscreenElement) {
-              containerRef.current?.requestFullscreen();
-          } else {
-              document.exitFullscreen();
-          }
-      },
-      setVolume: (vol) => {
-          if (videoRef.current) {
-              videoRef.current.volume = vol;
-          }
-          if (compareVideoRef.current && compareAudioEnabled) {
-              compareVideoRef.current.volume = vol;
-          }
-      },
-      setPlaybackRate: (rate) => {
-          if (videoRef.current) {
-              videoRef.current.playbackRate = rate;
-          }
-          if (compareVideoRef.current) {
-              compareVideoRef.current.playbackRate = rate;
-          }
-      }
-  }));
+    useEffect(() => {
+        currentAnnotationRef.current = currentAnnotation;
+    }, [currentAnnotation]);
 
-  const handleVideoPlay = () => {
-      setIsPlaying(true);
-      if (onPlayStateChange) onPlayStateChange(true);
-  };
+    useEffect(() => {
+        draggingAnnotationRef.current = draggingAnnotation;
+    }, [draggingAnnotation]);
 
-  const handleVideoPause = () => {
-      setIsPlaying(false);
-      if (onPlayStateChange) onPlayStateChange(false);
-  };
+    // Load Draft
+    useEffect(() => {
+        if (src) {
+            try {
+                const draftKey = `draft_video_${btoa(src).slice(0, 32)}`;
+                const saved = localStorage.getItem(draftKey);
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    setAnnotations(parsed);
+                }
+            } catch (e) { }
+        }
+    }, [src]);
 
-  useEffect(() => {
-     if (videoRef.current) videoRef.current.loop = loop;
-     if (compareVideoRef.current) compareVideoRef.current.loop = loop;
-  }, [loop]);
+    // Save Draft & History
+    useEffect(() => {
+        if (src) {
+            try {
+                const draftKey = `draft_video_${btoa(src).slice(0, 32)}`;
+                localStorage.setItem(draftKey, JSON.stringify(annotations));
+            } catch (e) { }
+        }
 
-  useEffect(() => {
-      if (videoRef.current) videoRef.current.playbackRate = playbackRate || 1;
-      if (compareVideoRef.current) compareVideoRef.current.playbackRate = playbackRate || 1;
-  }, [playbackRate]);
+        if (isUndoing.current) {
+            isUndoing.current = false;
+            return;
+        }
 
-  useEffect(() => {
-      if (compareVideoRef.current) {
-          compareVideoRef.current.muted = !compareAudioEnabled;
-      }
-  }, [compareAudioEnabled]);
+        setHistory(prev => {
+            const newHist = prev.slice(0, historyIndex + 1);
+            newHist.push([...annotations]);
+            return newHist;
+        });
+        setHistoryIndex(prev => prev + 1);
+    }, [annotations, src]);
 
-  useEffect(() => {
-      const handleFullscreenChange = () => {
-          if (document.fullscreenElement) {
-              setShowFullscreenMessage(true);
-              setTimeout(() => setShowFullscreenMessage(false), 2000);
-          } else {
-              setShowFullscreenMessage(false);
-          }
-      };
-
-      document.addEventListener('fullscreenchange', handleFullscreenChange);
-      return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, []);
-
-  // Coordinate Normalization Helpers
-  const normalize = (x, y) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    return {
-        x: x / canvas.width,
-        y: y / canvas.height
+    const handleUndo = () => {
+        if (historyIndex > 0) {
+            isUndoing.current = true;
+            const prev = history[historyIndex - 1];
+            setAnnotations(prev);
+            setHistoryIndex(historyIndex - 1);
+        }
     };
-  };
+    const handleSendReview = () => {
+        if (onAnnotationSave) onAnnotationSave(annotations);
+        if (onReviewSubmit) onReviewSubmit();
+        // Auto-exit drawing mode after sending
+        setIsDrawingMode(false);
+        if (onDrawingModeChange) onDrawingModeChange(false);
+        setTool('pointer');
+        setAnnotations([]);
+    };
 
-  const drawShape = useCallback((ctx, shape) => {
-      ctx.beginPath();
-      ctx.strokeStyle = shape.color;
+    // Expose methods
+    useImperativeHandle(ref, () => ({
+        getAnnotations: () => {
+            if (isDrawing && currentAnnotation) {
+                return [...annotations, currentAnnotation];
+            }
+            return annotations;
+        },
+        getScreenshot: (options = { includeAnnotations: false }) => {
+            if (!videoRef.current || !canvasRef.current) return null;
+            const video = videoRef.current;
+            const canvas = canvasRef.current;
+            const offscreen = document.createElement('canvas');
+            offscreen.width = video.videoWidth;
+            offscreen.height = video.videoHeight;
+            const ctx = offscreen.getContext('2d');
+            ctx.drawImage(video, 0, 0, offscreen.width, offscreen.height);
+            if (options.includeAnnotations) {
+                ctx.drawImage(canvas, 0, 0);
+            }
+            return offscreen.toDataURL('image/jpeg', 0.85);
+        },
+        clearAnnotations: () => {
+            setAnnotations([]);
+            setIsDrawingMode(false);
+            setTool('pointer');
+            setCurrentAnnotation(null);
+            setIsDrawing(false);
+        },
+        seek: (time) => {
+            if (videoRef.current) videoRef.current.currentTime = time;
+            if (compareVideoRef.current) compareVideoRef.current.currentTime = time;
+        },
+        togglePlay: () => {
+            togglePlay();
+        },
+        pause: () => {
+            if (videoRef.current) {
+                videoRef.current.pause();
+                setIsPlaying(false);
+                if (onPlayStateChange) onPlayStateChange(false);
+            }
+            if (compareVideoRef.current) compareVideoRef.current.pause();
+        },
+        toggleFullscreen: () => {
+            if (!document.fullscreenElement) {
+                containerRef.current?.requestFullscreen();
+            } else {
+                document.exitFullscreen();
+            }
+        },
+        setVolume: (vol) => {
+            if (videoRef.current) videoRef.current.volume = vol;
+            if (compareVideoRef.current && compareAudioEnabled) compareVideoRef.current.volume = vol;
+        },
+        setPlaybackRate: (rate) => {
+            if (videoRef.current) videoRef.current.playbackRate = rate;
+            if (compareVideoRef.current) compareVideoRef.current.playbackRate = rate;
+        },
+        // Drawing mode control methods (for external toolbar)
+        setDrawingMode: (mode) => {
+            setIsDrawingMode(mode);
+            if (mode) {
+                videoRef.current?.pause();
+                setIsPlaying(false);
+                updateCanvasLayout();
+            }
+        },
+        setDrawingTool: (newTool) => {
+            setTool(newTool);
+        },
+        setDrawingColor: (newColor) => {
+            setColor(newColor);
+        },
+        setDrawingStrokeWidth: (width) => {
+            setStrokeWidth(width);
+        },
+        getDrawingState: () => ({
+            isDrawingMode,
+            tool,
+            color,
+            strokeWidth,
+            hasAnnotations: annotations.length > 0,
+            canUndo: historyIndex > 0
+        }),
+        undoAnnotation: handleUndo,
+        sendAnnotations: handleSendReview
+    }));
 
-      const canvas = ctx.canvas;
-      const scaleFactor = Math.max(canvas.width / 1920, 0.5);
-      // Use stored strokeWidth if available, default to 10
-      const width = shape.strokeWidth || 10;
-      const baseWidth = shape.tool === 'highlighter' ? width * 3 : width;
-      ctx.lineWidth = baseWidth * scaleFactor;
+    const handleVideoPlay = () => {
+        setIsPlaying(true);
+        if (onPlayStateChange) onPlayStateChange(true);
+    };
 
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.globalAlpha = shape.tool === 'highlighter' ? 0.4 : 1.0;
-      ctx.fillStyle = shape.color;
+    const handleVideoPause = () => {
+        setIsPlaying(false);
+        if (onPlayStateChange) onPlayStateChange(false);
+    };
 
-      const w = canvas.width;
-      const h = canvas.height;
-      const isNormalized = (val) => val <= 1.5;
+    useEffect(() => {
+        if (videoRef.current) videoRef.current.loop = loop;
+        if (compareVideoRef.current) compareVideoRef.current.loop = loop;
+    }, [loop]);
 
-      const getCoord = (sx, sy) => {
-          if (shape.isNormalized || (shape.points && shape.points.length > 0 && isNormalized(shape.points[0].x))) {
-               return { x: sx * w, y: sy * h };
-          }
-          if (shape.isNormalized || (shape.x !== undefined && isNormalized(shape.x))) {
-               return { x: sx * w, y: sy * h };
-          }
-          return { x: sx, y: sy };
-      };
+    useEffect(() => {
+        if (videoRef.current) videoRef.current.playbackRate = playbackRate || 1;
+        if (compareVideoRef.current) compareVideoRef.current.playbackRate = playbackRate || 1;
+    }, [playbackRate]);
 
-      if (shape.tool === 'pencil' || shape.tool === 'highlighter' || shape.tool === 'eraser') {
-          if (shape.points.length < 2) return;
-          const p0 = getCoord(shape.points[0].x, shape.points[0].y);
-          ctx.moveTo(p0.x, p0.y);
-          for (let i = 1; i < shape.points.length; i++) {
-              const pi = getCoord(shape.points[i].x, shape.points[i].y);
-              ctx.lineTo(pi.x, pi.y);
-          }
-          if (shape.tool === 'eraser') {
-            ctx.globalCompositeOperation = 'destination-out';
-            ctx.lineWidth = (width * 3) * scaleFactor;
-          } else {
-             ctx.globalCompositeOperation = 'source-over';
-          }
-          ctx.stroke();
-      } else {
-          const p = getCoord(shape.x, shape.y);
-          const dims = shape.isNormalized
-              ? { w: shape.w * w, h: shape.h * h }
-              : { w: shape.w, h: shape.h };
+    useEffect(() => {
+        if (compareVideoRef.current) {
+            compareVideoRef.current.muted = !compareAudioEnabled;
+        }
+    }, [compareAudioEnabled]);
 
-          if (!shape.isNormalized && isNormalized(shape.w) && shape.w > 0) {
-             dims.w = shape.w * w;
-             dims.h = shape.h * h;
-          }
+    useEffect(() => {
+        const handleFullscreenChange = () => {
+            if (document.fullscreenElement) {
+                setShowFullscreenMessage(true);
+                setTimeout(() => setShowFullscreenMessage(false), 2000);
+            } else {
+                setShowFullscreenMessage(false);
+            }
+        };
+        document.addEventListener('fullscreenchange', handleFullscreenChange);
+        return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    }, []);
 
-          if (shape.tool === 'rect') {
-              ctx.strokeRect(p.x, p.y, dims.w, dims.h);
-          } else if (shape.tool === 'circle') {
-              ctx.ellipse(p.x + dims.w/2, p.y + dims.h/2, Math.abs(dims.w/2), Math.abs(dims.h/2), 0, 0, 2 * Math.PI);
-              ctx.stroke();
-          } else if (shape.tool === 'line') {
-              ctx.moveTo(p.x, p.y);
-              ctx.lineTo(p.x + dims.w, p.y + dims.h);
-              ctx.stroke();
-          } else if (shape.tool === 'arrow') {
-              const headlen = width * 3 * scaleFactor;
-              const tox = p.x + dims.w;
-              const toy = p.y + dims.h;
-              const angle = Math.atan2(toy - p.y, tox - p.x);
-              ctx.moveTo(p.x, p.y);
-              ctx.lineTo(tox, toy);
-              ctx.lineTo(tox - headlen * Math.cos(angle - Math.PI / 6), toy - headlen * Math.sin(angle - Math.PI / 6));
-              ctx.moveTo(tox, toy);
-              ctx.lineTo(tox - headlen * Math.cos(angle + Math.PI / 6), toy - headlen * Math.sin(angle + Math.PI / 6));
-              ctx.stroke();
-          } else if (shape.tool === 'text') {
-               ctx.font = `${(width * 3) * scaleFactor}px sans-serif`;
-               ctx.fillText(shape.text || 'Text', p.x, p.y);
-          } else if (shape.tool === 'bubble') {
-              // Speech bubble
-              const r = 10 * scaleFactor;
-              const x = p.x;
-              const y = p.y;
-              const w_ = dims.w;
-              const h_ = dims.h;
+    const normalize = (x, y) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return { x: 0, y: 0 };
+        return {
+            x: x / canvas.width,
+            y: y / canvas.height
+        };
+    };
 
-              ctx.beginPath();
-              ctx.moveTo(x + r, y);
-              ctx.lineTo(x + w_ - r, y);
-              ctx.quadraticCurveTo(x + w_, y, x + w_, y + r);
-              ctx.lineTo(x + w_, y + h_ - r);
-              ctx.quadraticCurveTo(x + w_, y + h_, x + w_ - r, y + h_);
+    const drawShape = useCallback((ctx, shape) => {
+        ctx.beginPath();
+        ctx.strokeStyle = shape.color;
 
-              // Tail
-              // If width is negative, we are drawing leftwards.
-              // Normalize for drawing logic
-              const tailX = x + w_ * 0.2;
-              const tailY = y + h_;
+        const canvas = ctx.canvas;
+        const scaleFactor = Math.max(canvas.width / 1920, 0.5);
+        const width = shape.strokeWidth || 10;
+        const baseWidth = shape.tool === 'highlighter' ? width * 3 : width;
+        ctx.lineWidth = baseWidth * scaleFactor;
 
-              ctx.lineTo(tailX + 10 * scaleFactor, y + h_);
-              ctx.lineTo(tailX, y + h_ + 20 * scaleFactor);
-              ctx.lineTo(tailX - 10 * scaleFactor, y + h_);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.globalAlpha = shape.tool === 'highlighter' ? 0.4 : 1.0;
+        ctx.fillStyle = shape.color;
 
-              ctx.lineTo(x + r, y + h_);
-              ctx.quadraticCurveTo(x, y + h_, x, y + h_ - r);
-              ctx.lineTo(x, y + r);
-              ctx.quadraticCurveTo(x, y, x + r, y);
-              ctx.stroke();
+        const w = canvas.width;
+        const h = canvas.height;
+        const isNormalized = (val) => val <= 1.5;
 
-          } else if (shape.tool === 'curve') {
-              // Quadratic curve from Start to End
-              const startX = p.x;
-              const startY = p.y;
-              const endX = p.x + dims.w;
-              const endY = p.y + dims.h;
+        const getCoord = (sx, sy) => {
+            if (shape.isNormalized || (shape.points && shape.points.length > 0 && isNormalized(shape.points[0].x))) {
+                return { x: sx * w, y: sy * h };
+            }
+            if (shape.isNormalized || (shape.x !== undefined && isNormalized(shape.x))) {
+                return { x: sx * w, y: sy * h };
+            }
+            return { x: sx, y: sy };
+        };
 
-              // Control point (offset perpendicular to line)
-              const midX = (startX + endX) / 2;
-              const midY = (startY + endY) / 2;
+        if (hoveredShapeIndex !== -1 && annotationsRef.current[hoveredShapeIndex] === shape) {
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = 'rgba(239, 68, 68, 0.8)';
+            ctx.lineWidth += 2;
+        }
 
-              // Simulating a curve by offsetting control point
-              // For a simple interaction, dragging gives end point.
-              // We'll just curve "up" relative to the line.
-              const cpX = midX;
-              const cpY = midY - Math.abs(dims.w) * 0.5; // Simple heuristic
+        if (shape.tool === 'pencil' || shape.tool === 'highlighter' || shape.tool === 'eraser') {
+            if (shape.points.length < 2) {
+                ctx.shadowBlur = 0;
+                return;
+            }
+            const p0 = getCoord(shape.points[0].x, shape.points[0].y);
+            ctx.moveTo(p0.x, p0.y);
+            for (let i = 1; i < shape.points.length; i++) {
+                const pi = getCoord(shape.points[i].x, shape.points[i].y);
+                ctx.lineTo(pi.x, pi.y);
+            }
+            if (shape.tool === 'eraser') {
+                ctx.globalCompositeOperation = 'destination-out';
+                ctx.lineWidth = (width * 3) * scaleFactor;
+            } else {
+                ctx.globalCompositeOperation = 'source-over';
+            }
+            ctx.stroke();
+        } else {
+            const p = getCoord(shape.x, shape.y);
+            const dims = shape.isNormalized
+                ? { w: shape.w * w, h: shape.h * h }
+                : { w: shape.w, h: shape.h };
 
-              ctx.moveTo(startX, startY);
-              ctx.quadraticCurveTo(cpX, cpY, endX, endY);
-              ctx.stroke();
+            if (!shape.isNormalized && isNormalized(shape.w) && shape.w > 0) {
+                dims.w = shape.w * w;
+                dims.h = shape.h * h;
+            }
 
-              // Arrow head at end
-              const angle = Math.atan2(endY - cpY, endX - cpX);
-              const headlen = width * 3 * scaleFactor;
-              ctx.lineTo(endX - headlen * Math.cos(angle - Math.PI / 6), endY - headlen * Math.sin(angle - Math.PI / 6));
-              ctx.moveTo(endX, endY);
-              ctx.lineTo(endX - headlen * Math.cos(angle + Math.PI / 6), endY - headlen * Math.sin(angle + Math.PI / 6));
-              ctx.stroke();
-          }
-      }
+            if (shape.tool === 'rect') {
+                ctx.strokeRect(p.x, p.y, dims.w, dims.h);
+            } else if (shape.tool === 'circle') {
+                ctx.ellipse(p.x + dims.w / 2, p.y + dims.h / 2, Math.abs(dims.w / 2), Math.abs(dims.h / 2), 0, 0, 2 * Math.PI);
+                ctx.stroke();
+            } else if (shape.tool === 'line') {
+                ctx.moveTo(p.x, p.y);
+                ctx.lineTo(p.x + dims.w, p.y + dims.h);
+                ctx.stroke();
+            } else if (shape.tool === 'arrow') {
+                const headlen = width * 3 * scaleFactor;
+                const tox = p.x + dims.w;
+                const toy = p.y + dims.h;
+                const angle = Math.atan2(toy - p.y, tox - p.x);
+                ctx.moveTo(p.x, p.y);
+                ctx.lineTo(tox, toy);
+                ctx.lineTo(tox - headlen * Math.cos(angle - Math.PI / 6), toy - headlen * Math.sin(angle - Math.PI / 6));
+                ctx.moveTo(tox, toy);
+                ctx.lineTo(tox - headlen * Math.cos(angle + Math.PI / 6), toy - headlen * Math.sin(angle + Math.PI / 6));
+                ctx.stroke();
+            } else if (shape.tool === 'text') {
+                ctx.font = `${(width * 3) * scaleFactor}px sans-serif`;
+                ctx.fillText(shape.text || 'Text', p.x, p.y);
+            } else if (shape.tool === 'bubble') {
+                const r = 10 * scaleFactor;
+                const x = p.x;
+                const y = p.y;
+                const w_ = dims.w;
+                const h_ = dims.h;
 
-      ctx.globalAlpha = 1.0;
-      ctx.globalCompositeOperation = 'source-over';
-  }, []);
+                ctx.beginPath();
+                ctx.moveTo(x + r, y);
+                ctx.lineTo(x + w_ - r, y);
+                ctx.quadraticCurveTo(x + w_, y, x + w_, y + r);
+                ctx.lineTo(x + w_, y + h_ - r);
+                ctx.quadraticCurveTo(x + w_, y + h_, x + w_ - r, y + h_);
 
-  // Stable redraw function
-  const performRedraw = useCallback(() => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+                const tailX = x + w_ * 0.2;
+                const tailY = y + h_;
 
-      const currentAnnos = annotationsRef.current || [];
-      const activeAnno = currentAnnotationRef.current;
+                ctx.lineTo(tailX + 10 * scaleFactor, y + h_);
+                ctx.lineTo(tailX, y + h_ + 20 * scaleFactor);
+                ctx.lineTo(tailX - 10 * scaleFactor, y + h_);
 
-      [...currentAnnos, activeAnno].filter(Boolean).forEach(shape => drawShape(ctx, shape));
-  }, [drawShape]);
+                ctx.lineTo(x + r, y + h_);
+                ctx.quadraticCurveTo(x, y + h_, x, y + h_ - r);
+                ctx.lineTo(x, y + r);
+                ctx.quadraticCurveTo(x, y, x + r, y);
+                ctx.stroke();
 
-  const updateCanvasLayout = useCallback(() => {
-    const video = videoRef.current;
-    const container = containerRef.current;
-    const canvas = canvasRef.current;
+            } else if (shape.tool === 'curve') {
+                const startX = p.x;
+                const startY = p.y;
+                const endX = p.x + dims.w;
+                const endY = p.y + dims.h;
+                const cpX = (startX + endX) / 2;
+                const cpY = (startY + endY) / 2 - Math.abs(dims.w) * 0.5;
+                ctx.moveTo(startX, startY);
+                ctx.quadraticCurveTo(cpX, cpY, endX, endY);
+                ctx.stroke();
+                const angle = Math.atan2(endY - cpY, endX - cpX);
+                const headlen = width * 3 * scaleFactor;
+                ctx.lineTo(endX - headlen * Math.cos(angle - Math.PI / 6), endY - headlen * Math.sin(angle - Math.PI / 6));
+                ctx.moveTo(endX, endY);
+                ctx.lineTo(endX - headlen * Math.cos(angle + Math.PI / 6), endY - headlen * Math.sin(angle + Math.PI / 6));
+                ctx.stroke();
+            }
+        }
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1.0;
+        ctx.globalCompositeOperation = 'source-over';
+    }, [hoveredShapeIndex]);
 
-    if (!video || !container || !canvas) return;
+    const performRedraw = useCallback(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const currentAnnos = annotationsRef.current || [];
+        const activeAnno = currentAnnotationRef.current;
+        [...currentAnnos, activeAnno].filter(Boolean).forEach(shape => drawShape(ctx, shape));
+    }, [drawShape]);
 
-    // Get video intrinsic dimensions
-    const vw = video.videoWidth;
-    const vh = video.videoHeight;
+    const updateCanvasLayout = useCallback(() => {
+        const video = videoRef.current;
+        const canvas = canvasRef.current;
+        const container = containerRef.current;
+        const wrapper = wrapperRef.current;
 
-    if (!vw || !vh) return;
+        if (!video || !canvas || !container) return;
 
-    // Get container dimensions
-    const cw = container.clientWidth;
-    const ch = container.clientHeight;
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+        if (!vw || !vh) return;
 
-    // Calculate the displayed size of the video (simulating object-contain)
-    const scale = Math.min(cw / vw, ch / vh);
-    const displayedWidth = vw * scale;
-    const displayedHeight = vh * scale;
-
-    // Position centered
-    const left = (cw - displayedWidth) / 2;
-    const top = (ch - displayedHeight) / 2;
-
-    // Check if update is needed to avoid loops
-    if (canvas.width !== vw || canvas.height !== vh ||
-        canvas.style.width !== `${displayedWidth}px` ||
-        canvas.style.height !== `${displayedHeight}px` ||
-        canvas.style.left !== `${left}px` ||
-        canvas.style.top !== `${top}px`) {
-
-        // Set canvas internal resolution to match video source
+        // Update canvas resolution to match video resolution
         if (canvas.width !== vw || canvas.height !== vh) {
             canvas.width = vw;
             canvas.height = vh;
+            performRedraw();
         }
 
-        // Set canvas CSS to match displayed video size
-        canvas.style.width = `${displayedWidth}px`;
-        canvas.style.height = `${displayedHeight}px`;
-        canvas.style.left = `${left}px`;
-        canvas.style.top = `${top}px`;
+        if (wrapper) {
+            const cw = container.clientWidth;
+            const ch = container.clientHeight;
+            const scale = Math.min(cw / vw, ch / vh);
+            const displayedWidth = vw * scale;
+            const displayedHeight = vh * scale;
 
-        // Redraw after layout update
+            wrapper.style.width = `${displayedWidth}px`;
+            wrapper.style.height = `${displayedHeight}px`;
+            // wrapper.style.aspectRatio = 'auto'; // Remove aspect ratio constraint if present
+        }
+
+    }, [performRedraw]);
+
+    useEffect(() => {
+        if (isDrawingModeTrigger && !isReadOnly) {
+            enterDrawingMode();
+            setTool('pointer');
+        }
+    }, [isDrawingModeTrigger, isReadOnly]);
+
+    useEffect(() => {
+        if (viewingAnnotation) {
+            setAnnotations(viewingAnnotation);
+        } else if (!isDrawingMode && isPlaying) {
+            setAnnotations((prev) => prev.length === 0 ? prev : []);
+        } else if (!isDrawingMode && !viewingAnnotation) {
+            setAnnotations((prev) => prev.length === 0 ? prev : []);
+        }
+    }, [viewingAnnotation, isDrawingMode, isPlaying]);
+
+    useEffect(() => {
+        if (isPlaying && !isDrawingMode && !viewingAnnotation) {
+            setAnnotations([]);
+        }
+    }, [isPlaying, isDrawingMode, viewingAnnotation]);
+
+    useEffect(() => {
         performRedraw();
-    }
-  }, [performRedraw]);
+    }, [annotations, currentAnnotation, performRedraw]);
 
-  // Handle trigger from parent (Annotate Button in Sidebar)
-  useEffect(() => {
-    if (isDrawingModeTrigger && !isReadOnly) {
-        enterDrawingMode();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDrawingModeTrigger, isReadOnly]);
-
-  // Handle Viewing Annotation
-  useEffect(() => {
-      if (viewingAnnotation) {
-          setAnnotations(viewingAnnotation);
-      } else if (!isDrawingMode && isPlaying) {
-          // If playing and no viewing annotation, clear.
-          setAnnotations((prev) => prev.length === 0 ? prev : []);
-      } else if (!isDrawingMode && !viewingAnnotation) {
-          setAnnotations((prev) => prev.length === 0 ? prev : []);
-      }
-  }, [viewingAnnotation, isDrawingMode, isPlaying]);
-
-  // Ensure annotations are cleared if playing starts (redundancy safety)
-  useEffect(() => {
-      if (isPlaying && !isDrawingMode && !viewingAnnotation) {
-           setAnnotations([]);
-      }
-  }, [isPlaying, isDrawingMode, viewingAnnotation]);
-
-  // Re-draw whenever annotations state changes
-  useEffect(() => {
-     performRedraw();
-  }, [annotations, currentAnnotation, performRedraw]);
-
-  // Handle resizing canvas
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const resizeObserver = new ResizeObserver(() => {
-        // Wrap in RAF to avoid "ResizeObserver loop limit exceeded" and potential sync loops
-        requestAnimationFrame(() => {
-            updateCanvasLayout();
+    useEffect(() => {
+        const container = containerRef.current;
+        if (!container) return;
+        const resizeObserver = new ResizeObserver(() => {
+            requestAnimationFrame(() => {
+                updateCanvasLayout();
+            });
         });
-    });
+        resizeObserver.observe(container);
+        return () => resizeObserver.disconnect();
+    }, [updateCanvasLayout]);
 
-    resizeObserver.observe(container);
+    const togglePlay = useCallback(() => {
+        if (isDrawingMode) return;
+        if (!videoRef.current) return;
+        if (videoRef.current.paused) {
+            videoRef.current.play();
+            if (compareVideoRef.current) compareVideoRef.current.play().catch(e => console.log(e));
+            setIsPlaying(true);
+            if (onUserPlay) onUserPlay();
+            if (onPlayStateChange) onPlayStateChange(true);
+        } else {
+            videoRef.current.pause();
+            if (compareVideoRef.current) compareVideoRef.current.pause();
+            setIsPlaying(false);
+            if (onPlayStateChange) onPlayStateChange(false);
+        }
+    }, [isDrawingMode, onUserPlay, onPlayStateChange]);
 
-    return () => resizeObserver.disconnect();
-  }, [updateCanvasLayout]);
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            const activeTag = document.activeElement?.tagName?.toLowerCase();
+            if (activeTag === 'input' || activeTag === 'textarea') return;
 
-  const togglePlay = useCallback(() => {
-    if (isDrawingMode) return;
-    if (!videoRef.current) return;
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+                e.preventDefault();
+                handleUndo();
+            } else if (e.code === 'Space') {
+                e.preventDefault();
+                togglePlay();
+            } else if (e.code === 'ArrowRight') {
+                e.preventDefault();
+                if (videoRef.current) {
+                    const currentFrame = timeToFrame(videoRef.current.currentTime, frameRate);
+                    const safeDuration = videoRef.current.duration;
+                    const nextTime = frameToTime(currentFrame + 1, frameRate);
+                    videoRef.current.currentTime = Math.min(safeDuration, nextTime);
+                }
+            } else if (e.code === 'ArrowLeft') {
+                e.preventDefault();
+                if (videoRef.current) {
+                    const currentFrame = timeToFrame(videoRef.current.currentTime, frameRate);
+                    const prevTime = frameToTime(currentFrame - 1, frameRate);
+                    videoRef.current.currentTime = Math.max(0, prevTime);
+                }
+            }
+        };
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    }, [togglePlay, frameRate, history, historyIndex]);
 
-    if (videoRef.current.paused) {
-      videoRef.current.play();
-      if (compareVideoRef.current) compareVideoRef.current.play().catch(e => console.log(e));
-      setIsPlaying(true);
-      if (onUserPlay) onUserPlay();
-      if (onPlayStateChange) onPlayStateChange(true);
-    } else {
-      videoRef.current.pause();
-      if (compareVideoRef.current) compareVideoRef.current.pause();
-      setIsPlaying(false);
-      if (onPlayStateChange) onPlayStateChange(false);
-    }
-  }, [isDrawingMode, onUserPlay, onPlayStateChange]);
-
-  // Handle Spacebar to Toggle Play and Arrow Keys for seeking
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      const activeTag = document.activeElement?.tagName?.toLowerCase();
-      if (activeTag === 'input' || activeTag === 'textarea') return;
-
-      if (e.code === 'Space') {
-        e.preventDefault(); // Prevent scrolling
-        togglePlay();
-      } else if (e.code === 'ArrowRight') {
-          e.preventDefault();
-          if (videoRef.current) {
-              videoRef.current.currentTime = Math.min(videoRef.current.duration, videoRef.current.currentTime + (1 / frameRate));
-          }
-      } else if (e.code === 'ArrowLeft') {
-          e.preventDefault();
-          if (videoRef.current) {
-              videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - (1 / frameRate));
-          }
-      }
+    const handleTimeUpdate = () => {
+        const time = videoRef.current.currentTime;
+        setCurrentTime(time);
+        if (onTimeUpdate) onTimeUpdate(time);
+        if (compareVideoRef.current) {
+            if (Math.abs(compareVideoRef.current.currentTime - time) > 0.05) {
+                compareVideoRef.current.currentTime = time;
+            }
+        }
     };
 
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [togglePlay, frameRate]);
-
-  const handleTimeUpdate = () => {
-    const time = videoRef.current.currentTime;
-    setCurrentTime(time);
-    if (onTimeUpdate) onTimeUpdate(time);
-
-    // Strict sync for compare video
-    if (compareVideoRef.current) {
-        // Use a tighter threshold (e.g., ~1 frame at 24fps is 0.041s)
-        if (Math.abs(compareVideoRef.current.currentTime - time) > 0.05) {
-            compareVideoRef.current.currentTime = time;
+    const onLoadedMetadata = () => {
+        const d = videoRef.current.duration;
+        const v = videoRef.current;
+        if (Number.isFinite(d)) {
+            setDuration(d);
+            if (onDurationChange) onDurationChange(d);
         }
-    }
-  };
+        if (v) {
+            setVideoDimensions({ width: v.videoWidth, height: v.videoHeight });
+        }
+        updateCanvasLayout();
+    };
 
-  const onLoadedMetadata = () => {
-      const d = videoRef.current.duration;
-      if (Number.isFinite(d)) {
-          setDuration(d);
-          if (onDurationChange) onDurationChange(d);
-      }
-      updateCanvasLayout();
-  };
+    const onVideoError = (e) => {
+        console.error("Video Error Event:", e);
+        if (videoRef.current && videoRef.current.error) {
+            setVideoError(videoRef.current.error.message);
+        }
+    };
 
-  const onVideoError = (e) => {
-      console.error("Video Error Event:", e);
-      if (videoRef.current && videoRef.current.error) {
-          console.error("Video Error Details:", videoRef.current.error);
-          setVideoError(videoRef.current.error.message);
-      }
-  };
+    const getPos = (e) => {
+        const rect = canvasRef.current.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        const x = clientX - rect.left;
+        const y = clientY - rect.top;
+        const containerRect = containerRef.current.getBoundingClientRect();
+        const containerX = clientX - containerRect.left;
+        const containerY = clientY - containerRect.top;
+        return {
+            pixel: { x: Math.max(0, Math.min(x, rect.width)), y: Math.max(0, Math.min(y, rect.height)) },
+            containerPixel: { x: containerX, y: containerY },
+            norm: { x: Math.max(0, Math.min(x, rect.width)) / rect.width, y: Math.max(0, Math.min(y, rect.height)) / rect.height }
+        };
+    };
 
-  const formatTime = (time) => {
-    const minutes = Math.floor(time / 60);
-    const seconds = Math.floor(time % 60);
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-  };
+    const startDrawing = (e) => {
+        if (!isDrawingMode) return;
+        if (e.touches) e.preventDefault();
+        const pos = getPos(e);
+        setStartPos(pos.norm);
+        setLastPos(pos.norm);
 
-  // Drawing Handlers
-  const getPos = (e) => {
-      const rect = canvasRef.current.getBoundingClientRect();
-      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-      const x = clientX - rect.left;
-      const y = clientY - rect.top;
-      return {
-          pixel: { x, y },
-          norm: { x: x / rect.width, y: y / rect.height }
-      };
-  };
+        if (tool === 'object-eraser') {
+            const clickedIndex = [...annotations].reverse().findIndex(shape => isPointInShape(pos.norm, shape, canvasRef.current.getBoundingClientRect()));
+            if (clickedIndex !== -1) {
+                const actualIndex = annotations.length - 1 - clickedIndex;
+                const newAnnotations = [...annotations];
+                newAnnotations.splice(actualIndex, 1);
+                setAnnotations(newAnnotations);
+            }
+            return;
+        }
+        if (tool === 'pointer') {
+            const clickedIndex = [...annotations].reverse().findIndex(shape => isPointInShape(pos.norm, shape, canvasRef.current.getBoundingClientRect()));
+            if (clickedIndex !== -1) {
+                const actualIndex = annotations.length - 1 - clickedIndex;
+                setDraggingAnnotation({ ...annotations[actualIndex], index: actualIndex });
+                setIsDrawing(true);
+            }
+            return;
+        }
+        setIsDrawing(true);
+        if (tool === 'pencil' || tool === 'highlighter' || tool === 'eraser') {
+            setCurrentAnnotation({ tool, color, strokeWidth, points: [pos.norm], isNormalized: true });
+        } else if (tool === 'text') {
+            const text = prompt("Enter text:");
+            if (text) {
+                setAnnotations([...annotations, { tool, color, strokeWidth, x: pos.norm.x, y: pos.norm.y, text, isNormalized: true }]);
+            }
+            setIsDrawing(false);
+        } else {
+            setCurrentAnnotation({ tool, color, strokeWidth, x: pos.norm.x, y: pos.norm.y, w: 0, h: 0, isNormalized: true });
+        }
+    };
 
-  const startDrawing = (e) => {
-      if (!isDrawingMode) return;
-      // Prevent scrolling while drawing on touch devices
-      if (e.touches) e.preventDefault();
+    const draw = (e) => {
+        const pos = getPos(e);
+        setCursorPos(pos.containerPixel);
+        if (tool === 'object-eraser') {
+            const hitIndex = [...annotations].reverse().findIndex(shape => isPointInShape(pos.norm, shape, canvasRef.current.getBoundingClientRect()));
+            const actualIndex = hitIndex !== -1 ? annotations.length - 1 - hitIndex : -1;
+            if (hoveredShapeIndex !== actualIndex) {
+                setHoveredShapeIndex(actualIndex);
+                performRedraw();
+            }
+        } else if (hoveredShapeIndex !== -1) {
+            setHoveredShapeIndex(-1);
+            performRedraw();
+        }
+        if (tool === 'pointer' && !isDrawing) {
+            const hit = annotations.some(shape => isPointInShape(pos.norm, shape, canvasRef.current.getBoundingClientRect()));
+            canvasRef.current.style.cursor = hit ? 'move' : 'default';
+        }
+        if (!isDrawing) return;
+        if (!isDrawingMode) return;
+        if (tool === 'pointer' && draggingAnnotation) {
+            const deltaX = pos.norm.x - lastPos.x;
+            const deltaY = pos.norm.y - lastPos.y;
+            const updatedShape = moveShape(draggingAnnotation, { x: deltaX, y: deltaY });
+            setDraggingAnnotation(updatedShape);
+            setLastPos(pos.norm);
+            const newAnnotations = [...annotations];
+            newAnnotations[draggingAnnotation.index] = updatedShape;
+            setAnnotations(newAnnotations);
+            return;
+        }
+        if (tool === 'pencil' || tool === 'highlighter' || tool === 'eraser') {
+            setCurrentAnnotation(prev => ({ ...prev, points: [...prev.points, pos.norm] }));
+        } else {
+            setCurrentAnnotation(prev => ({ ...prev, w: pos.norm.x - startPos.x, h: pos.norm.y - startPos.y }));
+        }
+    };
 
-      setIsDrawing(true);
-      const pos = getPos(e);
-      setStartPos(pos.norm);
+    const stopDrawing = () => {
+        setIsDrawing(false);
+        setDraggingAnnotation(null);
+        if (currentAnnotation) {
+            setAnnotations([...annotations, currentAnnotation]);
+            setCurrentAnnotation(null);
+        }
+    };
 
-      if (tool === 'pencil' || tool === 'highlighter' || tool === 'eraser') {
-          setCurrentAnnotation({
-              tool,
-              color,
-              strokeWidth,
-              points: [pos.norm],
-              isNormalized: true
-          });
-      } else if (tool === 'text') {
-          const text = prompt("Enter text:");
-          if (text) {
-              setAnnotations([...annotations, {
-                  tool,
-                  color,
-                  strokeWidth,
-                  x: pos.norm.x,
-                  y: pos.norm.y,
-                  text,
-                  isNormalized: true
-              }]);
-          }
-          setIsDrawing(false);
-      } else {
-          setCurrentAnnotation({
-              tool,
-              color,
-              strokeWidth,
-              x: pos.norm.x,
-              y: pos.norm.y,
-              w: 0,
-              h: 0,
-              isNormalized: true
-          });
-      }
-  };
+    const enterDrawingMode = () => {
+        if (!isDrawingMode) setAnnotations([]);
+        setIsDrawingMode(true);
+        videoRef.current.pause();
+        setIsPlaying(false);
+        updateCanvasLayout();
+    };
 
-  const draw = (e) => {
-      if (!isDrawing || !isDrawingMode) return;
-      const pos = getPos(e);
+    const clearAnnotations = () => {
+        setAnnotations([]);
+    };
 
-      if (tool === 'pencil' || tool === 'highlighter' || tool === 'eraser') {
-          setCurrentAnnotation(prev => ({
-              ...prev,
-              points: [...prev.points, pos.norm]
-          }));
-      } else {
-          setCurrentAnnotation(prev => ({
-              ...prev,
-              w: pos.norm.x - startPos.x,
-              h: pos.norm.y - startPos.y
-          }));
-      }
-  };
+    return (
+        <div className="flex-1 flex flex-col relative overflow-hidden group bg-black w-full h-full">
+            <div ref={containerRef} className="relative flex-1 flex justify-center items-center w-full min-h-0">
+                {compareSrc ? (
+                    <div className="grid grid-cols-2 w-full h-full gap-1">
+                        <div className="relative w-full h-full flex items-center justify-center bg-black">
+                            <video
+                                ref={videoRef}
+                                src={src}
+                                className="max-h-full max-w-full object-contain cursor-pointer"
+                                onTimeUpdate={handleTimeUpdate}
+                                onLoadedMetadata={onLoadedMetadata}
+                                onError={onVideoError}
+                                onPlay={handleVideoPlay}
+                                onPause={handleVideoPause}
+                                onEnded={handleVideoPause}
+                                playsInline
+                                webkit-playsinline="true"
+                                onClick={togglePlay}
+                            />
+                            <div className="absolute top-2 left-2 bg-black/50 text-white text-xs px-2 py-1 rounded pointer-events-none">V1 (Current)</div>
+                        </div>
+                        <div className="relative w-full h-full flex items-center justify-center bg-black">
+                            <video
+                                ref={compareVideoRef}
+                                src={compareSrc}
+                                className="max-h-full max-w-full object-contain"
+                                playsInline
+                                webkit-playsinline="true"
+                                muted={!compareAudioEnabled}
+                                onClick={togglePlay}
+                            />
+                            <div className="absolute top-2 left-2 bg-black/50 text-white text-xs px-2 py-1 rounded pointer-events-none">V2 (Compare)</div>
+                        </div>
+                    </div>
+                ) : (
+                    <div
+                        className="relative w-full h-full flex items-center justify-center"
+                        style={{
+                            maxHeight: '100%',
+                            maxWidth: '100%'
+                        }}
+                    >
+                        <div
+                            ref={wrapperRef}
+                            className="relative"
+                            style={{
+                                width: '100%', // Initial value, overriden by JS
+                                height: '100%',
+                            }}
+                        >
+                            <video
+                                ref={videoRef}
+                                src={src}
+                                className={`w-full h-full object-contain cursor-pointer ${videoError ? 'opacity-20' : ''}`}
+                                onTimeUpdate={handleTimeUpdate}
+                                onLoadedMetadata={onLoadedMetadata}
+                                onError={onVideoError}
+                                onPlay={handleVideoPlay}
+                                onPause={handleVideoPause}
+                                onEnded={handleVideoPause}
+                                playsInline
+                                webkit-playsinline="true"
+                                onClick={togglePlay}
+                                style={{
+                                    display: 'block',
+                                    maxHeight: '100%',
+                                    maxWidth: '100%',
+                                }}
+                            />
 
-  const stopDrawing = () => {
-      if (!isDrawing) return;
-      setIsDrawing(false);
-      if (currentAnnotation) {
-          setAnnotations([...annotations, currentAnnotation]);
-          setCurrentAnnotation(null);
-      }
-  };
+                            <canvas
+                                ref={canvasRef}
+                                className={`absolute inset-0 w-full h-full z-10 touch-none ${isDrawingMode ? (tool === 'pointer' ? 'cursor-default' : 'cursor-none') : 'pointer-events-none'}`}
+                                onMouseDown={startDrawing}
+                                onMouseMove={draw}
+                                onMouseUp={stopDrawing}
+                                onMouseLeave={stopDrawing}
+                                onTouchStart={startDrawing}
+                                onTouchMove={draw}
+                                onTouchEnd={stopDrawing}
+                            />
+                        </div>
+                    </div>
+                )}
 
-  const enterDrawingMode = () => {
-      setIsDrawingMode(true);
-      videoRef.current.pause();
-      setIsPlaying(false);
-      updateCanvasLayout();
-      setAnnotations([]);
-  };
+                {videoError && (
+                    <div className="absolute inset-0 flex items-center justify-center text-red-500 bg-black/50 p-4 rounded z-20 pointer-events-none">
+                        <div>Error loading video: {videoError}<br />Source: {src}</div>
+                    </div>
+                )}
 
-  const clearAnnotations = () => {
-      setAnnotations([]);
-  };
-
-  return (
-    <div className="flex-1 flex flex-col relative overflow-hidden group bg-black w-full h-full">
-      <div ref={containerRef} className="relative flex-1 flex justify-center items-center w-full min-h-0">
-        {compareSrc ? (
-            <div className="grid grid-cols-2 w-full h-full gap-1">
-                <div className="relative w-full h-full flex items-center justify-center bg-black">
-                     <video
-                        ref={videoRef}
-                        src={src}
-                        className="max-h-full max-w-full object-contain"
-                        onTimeUpdate={handleTimeUpdate}
-                        onLoadedMetadata={onLoadedMetadata}
-                        onError={onVideoError}
-                        onPlay={handleVideoPlay}
-                        onPause={handleVideoPause}
-                        onEnded={handleVideoPause}
-                        playsInline
-                        webkit-playsinline="true"
+                {isDrawingMode && !isReadOnly && !compareSrc && tool !== 'pointer' && tool !== 'text' && tool !== 'object-eraser' && (
+                    <div
+                        className="absolute pointer-events-none rounded-full border border-white z-20"
+                        style={{
+                            left: cursorPos.x,
+                            top: cursorPos.y,
+                            width: Math.max(strokeWidth * (canvasRef.current ? canvasRef.current.clientWidth / canvasRef.current.width : 1) * (tool === 'highlighter' ? 3 : 1), 4) + 'px',
+                            height: Math.max(strokeWidth * (canvasRef.current ? canvasRef.current.clientWidth / canvasRef.current.width : 1) * (tool === 'highlighter' ? 3 : 1), 4) + 'px',
+                            transform: 'translate(-50%, -50%)',
+                            backgroundColor: tool === 'eraser' ? 'rgba(255,255,255,0.5)' : color,
+                            opacity: 0.8
+                        }}
                     />
-                    <div className="absolute top-2 left-2 bg-black/50 text-white text-xs px-2 py-1 rounded pointer-events-none">V1 (Current)</div>
-                </div>
-                <div className="relative w-full h-full flex items-center justify-center bg-black">
-                     <video
-                        ref={compareVideoRef}
-                        src={compareSrc}
-                        className="max-h-full max-w-full object-contain"
-                        playsInline
-                        webkit-playsinline="true"
-                        muted={!compareAudioEnabled}
-                    />
-                    <div className="absolute top-2 left-2 bg-black/50 text-white text-xs px-2 py-1 rounded pointer-events-none">V2 (Compare)</div>
-                </div>
-            </div>
-        ) : (
-            <video
-                ref={videoRef}
-                src={src}
-                className={`max-h-full max-w-full object-contain ${videoError ? 'opacity-20' : ''}`}
-                onTimeUpdate={handleTimeUpdate}
-                onLoadedMetadata={onLoadedMetadata}
-                onError={onVideoError}
-                onPlay={handleVideoPlay}
-                onPause={handleVideoPause}
-                onEnded={handleVideoPause}
-                playsInline
-                webkit-playsinline="true"
-            />
-        )}
+                )}
+                {showFullscreenMessage && (
+                    <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/60 text-white px-4 py-2 rounded pointer-events-none transition-opacity duration-500 z-30">
+                        Press Esc to exit full screen
+                    </div>
+                )}
 
-        {videoError && (
-            <div className="absolute inset-0 flex items-center justify-center text-red-500 bg-black/50 p-4 rounded z-20 pointer-events-none">
-                <div>
-                    Error loading video: {videoError}
-                    <br/>
-                    Source: {src}
-                </div>
+                {/* DrawingToolbar removed - now handled by external VideoImageToolbar */}
             </div>
-        )}
-        {/* Canvas Overlay */}
-        <canvas
-            ref={canvasRef}
-            className={`absolute z-10 touch-none ${isDrawingMode ? 'cursor-crosshair' : 'pointer-events-none'} ${compareSrc ? 'pointer-events-none opacity-0' : ''}`} // Disable drawing in compare mode
-            style={{ width: '0px', height: '0px' }} // Initial state
-            onMouseDown={startDrawing}
-            onMouseMove={draw}
-            onMouseUp={stopDrawing}
-            onMouseLeave={stopDrawing}
-            onTouchStart={startDrawing}
-            onTouchMove={draw}
-            onTouchEnd={stopDrawing}
-        />
-      </div>
-
-      {showFullscreenMessage && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/60 text-white px-4 py-2 rounded pointer-events-none transition-opacity duration-500 z-30">
-              Press Esc to exit full screen
-          </div>
-      )}
-      {/* Drawing Toolbar - Static Bottom */}
-      {isDrawingMode && !isReadOnly && (
-          <div className="w-full bg-black/90 p-1 border-t border-white/10 flex items-center justify-center gap-1 z-20 overflow-x-auto whitespace-nowrap shrink-0">
-              <ToolButton icon={MousePointer} active={tool === 'pointer'} onClick={() => setTool('pointer')} />
-              <div className="w-px h-4 bg-white/20 mx-1" />
-              <ToolButton icon={Pencil} active={tool === 'pencil'} onClick={() => setTool('pencil')} />
-              <ToolButton icon={Square} active={tool === 'rect'} onClick={() => setTool('rect')} />
-              <ToolButton icon={Circle} active={tool === 'circle'} onClick={() => setTool('circle')} />
-              <ToolButton icon={MoveRight} active={tool === 'arrow'} onClick={() => setTool('arrow')} />
-              <ToolButton icon={CornerUpRight} active={tool === 'curve'} onClick={() => setTool('curve')} />
-              <ToolButton icon={Minus} active={tool === 'line'} onClick={() => setTool('line')} />
-              <ToolButton icon={Type} active={tool === 'text'} onClick={() => setTool('text')} />
-              <ToolButton icon={Highlighter} active={tool === 'highlighter'} onClick={() => setTool('highlighter')} />
-              <ToolButton icon={Eraser} active={tool === 'eraser'} onClick={() => setTool('eraser')} />
-              <div className="w-px h-4 bg-white/20 mx-1" />
-              <div className="flex items-center gap-1 px-1">
-                  <button onClick={() => setStrokeWidth(5)} className={`w-3 h-3 rounded-full bg-white/50 hover:bg-white ${strokeWidth === 5 ? 'ring-2 ring-primary' : ''}`} title="Thin" />
-                  <button onClick={() => setStrokeWidth(10)} className={`w-4 h-4 rounded-full bg-white/50 hover:bg-white ${strokeWidth === 10 ? 'ring-2 ring-primary' : ''}`} title="Medium" />
-                  <button onClick={() => setStrokeWidth(20)} className={`w-5 h-5 rounded-full bg-white/50 hover:bg-white ${strokeWidth === 20 ? 'ring-2 ring-primary' : ''}`} title="Thick" />
-              </div>
-              <div className="w-px h-4 bg-white/20 mx-1" />
-              <input
-                 type="color"
-                 value={color}
-                 onChange={e => setColor(e.target.value)}
-                 className="w-6 h-6 rounded cursor-pointer border-none bg-transparent p-0"
-              />
-              <div className="w-px h-4 bg-white/20 mx-1" />
-              <button onClick={clearAnnotations} className="text-white hover:text-red-400 px-2 text-[10px] uppercase font-bold">Clear</button>
-              <button onClick={() => { setIsDrawingMode(false); setAnnotations([]); }} className="text-white hover:text-red-400 p-1"><X size={16} /></button>
-          </div>
-      )}
-    </div>
-  );
+        </div>
+    );
 });
-
-const ToolButton = ({ icon: Icon, active, onClick }) => (
-    <button
-        onClick={onClick}
-        className={`p-2 md:p-1.5 rounded hover:bg-white/20 transition-colors ${active ? 'bg-primary text-white' : 'text-white/70'}`}
-    >
-        <Icon size={16} className="w-4 h-4 md:w-[16px] md:h-[16px]" />
-    </button>
-);
 
 export default VideoPlayer;

@@ -18,31 +18,31 @@ const DATA_PATH = process.env.DATA_PATH || path.join(__dirname, 'storage');
 const AVATAR_PATH = path.join(DATA_PATH, 'avatars');
 
 if (!fs.existsSync(AVATAR_PATH)) {
-    fs.mkdirSync(AVATAR_PATH, { recursive: true });
+  fs.mkdirSync(AVATAR_PATH, { recursive: true });
 }
 
 const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, AVATAR_PATH);
-    },
-    filename: (req, file, cb) => {
-        const uniqueSuffix = crypto.randomUUID();
-        cb(null, 'avatar-' + uniqueSuffix + path.extname(file.originalname));
-    }
+  destination: (req, file, cb) => {
+    cb(null, AVATAR_PATH);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = crypto.randomUUID();
+    cb(null, 'avatar-' + uniqueSuffix + path.extname(file.originalname));
+  }
 });
 
 const upload = multer({
-    storage: storage,
-    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
-    fileFilter: (req, file, cb) => {
-        const filetypes = /jpeg|jpg|png|webp/;
-        const mimetype = filetypes.test(file.mimetype);
-        const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
-        if (mimetype && extname) {
-            return cb(null, true);
-        }
-        cb(new Error("Error: File upload only supports images!"));
+  storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    const filetypes = /jpeg|jpg|png|webp/;
+    const mimetype = filetypes.test(file.mimetype);
+    const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
+    if (mimetype && extname) {
+      return cb(null, true);
     }
+    cb(new Error("Error: File upload only supports images!"));
+  }
 });
 
 // GET /auth/status: Check if setup is required (i.e., no users exist)
@@ -73,15 +73,15 @@ router.post('/setup', async (req, res) => {
     }
 
     if (!isValidEmail(email)) {
-        return res.status(400).json({ error: 'Invalid email format' });
+      return res.status(400).json({ error: 'Invalid email format' });
     }
 
     if (!isValidText(name, 100)) {
-        return res.status(400).json({ error: 'Name exceeds 100 characters' });
+      return res.status(400).json({ error: 'Name exceeds 100 characters' });
     }
 
     if (!isValidPassword(password)) {
-        return res.status(400).json({ error: 'Password must be 8-128 characters long and contain at least one letter and one number.' });
+      return res.status(400).json({ error: 'Password must be 8-128 characters long and contain at least one letter and one number.' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -106,9 +106,9 @@ router.post('/setup', async (req, res) => {
 
 // Rate limit: 5 attempts per hour per IP (Prevent brute force/spam)
 const registerLimiter = rateLimit({
-    windowMs: 60 * 60 * 1000,
-    max: 5,
-    message: { error: 'Too many registration attempts, please try again later.' }
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: { error: 'Too many registration attempts, please try again later.' }
 });
 
 // POST /auth/register: Register using an invite token
@@ -119,11 +119,11 @@ router.post('/register', registerLimiter, async (req, res) => {
   }
 
   if (!isValidText(name, 100)) {
-      return res.status(400).json({ error: 'Name exceeds 100 characters' });
+    return res.status(400).json({ error: 'Name exceeds 100 characters' });
   }
 
   if (!isValidPassword(password)) {
-      return res.status(400).json({ error: 'Password must be 8-128 characters long and contain at least one letter and one number.' });
+    return res.status(400).json({ error: 'Password must be 8-128 characters long and contain at least one letter and one number.' });
   }
 
   try {
@@ -134,31 +134,31 @@ router.post('/register', registerLimiter, async (req, res) => {
 
     // Double check email from invite is still valid (paranoid check)
     if (!isValidEmail(invite.email)) {
-        return res.status(400).json({ error: 'Invalid email format in invite' });
+      return res.status(400).json({ error: 'Invalid email format in invite' });
     }
 
     const existingUser = await prisma.user.findUnique({ where: { email: invite.email } });
     if (existingUser) {
-        return res.status(400).json({ error: 'User with this email already exists' });
+      return res.status(400).json({ error: 'User with this email already exists' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // Create user and mark invite as used in a transaction
     const user = await prisma.$transaction(async (prisma) => {
-        const newUser = await prisma.user.create({
-            data: {
-                email: invite.email,
-                password: hashedPassword,
-                name: name,
-                role: invite.role
-            }
-        });
-        await prisma.invite.update({
-            where: { id: invite.id },
-            data: { used: true }
-        });
-        return newUser;
+      const newUser = await prisma.user.create({
+        data: {
+          email: invite.email,
+          password: hashedPassword,
+          name: name,
+          role: invite.role
+        }
+      });
+      await prisma.invite.update({
+        where: { id: invite.id },
+        data: { used: true }
+      });
+      return newUser;
     });
 
     const jwtToken = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
@@ -173,9 +173,9 @@ router.post('/register', registerLimiter, async (req, res) => {
 // POST /auth/login
 // Rate limit: 10 attempts per 15 minutes
 const loginLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 10,
-    message: { error: 'Too many login attempts, please try again later.' }
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: 'Too many login attempts, please try again later.' }
 });
 
 router.post('/login', loginLimiter, async (req, res) => {
@@ -185,7 +185,13 @@ router.post('/login', loginLimiter, async (req, res) => {
     const user = await prisma.user.findUnique({
       where: { email },
       include: {
-        teams: { select: { id: true, name: true, storageUsed: true, storageLimit: true } },
+        teamMemberships: {
+          include: {
+            team: {
+              select: { id: true, name: true, storageUsed: true, storageLimit: true }
+            }
+          }
+        },
         ownedTeams: { select: { id: true, name: true, storageUsed: true, storageLimit: true } }
       }
     });
@@ -201,22 +207,29 @@ router.post('/login', loginLimiter, async (req, res) => {
     // Combine teams and ownedTeams, removing duplicates if any (though ownedTeams should be in teams usually? Schema says separate)
     // New schema: teams (member), ownedTeams (owner).
     // Let's return all unique teams.
-    const allTeams = [...user.teams, ...user.ownedTeams];
-    const uniqueTeams = Array.from(new Map(allTeams.map(t => [t.id, t])).values());
+    let uniqueTeams = [];
+
+    if (user.role === 'admin') {
+      uniqueTeams = await prisma.team.findMany();
+    } else {
+      const memberTeams = user.teamMemberships ? user.teamMemberships.map(tm => tm.team) : [];
+      const allTeams = [...memberTeams, ...user.ownedTeams];
+      uniqueTeams = Array.from(new Map(allTeams.map(t => [t.id, t])).values());
+    }
 
     const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
     res.json({
-        token,
-        user: {
-            id: user.id,
-            email: user.email,
-            role: user.role,
-            name: user.name,
-            preferences: user.preferences,
-            storageUsed: user.storageUsed,
-            storageLimit: user.storageLimit,
-            teams: uniqueTeams
-        }
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        name: user.name,
+        preferences: user.preferences,
+        storageUsed: user.storageUsed,
+        storageLimit: user.storageLimit,
+        teams: uniqueTeams
+      }
     });
 
   } catch (error) {
@@ -231,25 +244,38 @@ router.get('/me', authenticateToken, async (req, res) => {
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
       include: {
-        teams: { select: { id: true, name: true, storageUsed: true, storageLimit: true } },
+        teamMemberships: {
+          include: {
+            team: {
+              select: { id: true, name: true, storageUsed: true, storageLimit: true }
+            }
+          }
+        },
         ownedTeams: { select: { id: true, name: true, storageUsed: true, storageLimit: true } }
       }
     });
     if (!user) return res.sendStatus(404);
 
-    const allTeams = [...user.teams, ...user.ownedTeams];
-    const uniqueTeams = Array.from(new Map(allTeams.map(t => [t.id, t])).values());
+    let uniqueTeams = [];
+
+    if (user.role === 'admin') {
+      uniqueTeams = await prisma.team.findMany();
+    } else {
+      const memberTeams = user.teamMemberships ? user.teamMemberships.map(tm => tm.team) : [];
+      const allTeams = [...memberTeams, ...user.ownedTeams];
+      uniqueTeams = Array.from(new Map(allTeams.map(t => [t.id, t])).values());
+    }
 
     res.json({
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        name: user.name,
-        avatarPath: user.avatarPath,
-        preferences: user.preferences,
-        storageUsed: user.storageUsed,
-        storageLimit: user.storageLimit,
-        teams: uniqueTeams
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      name: user.name,
+      avatarPath: user.avatarPath,
+      preferences: user.preferences,
+      storageUsed: user.storageUsed,
+      storageLimit: user.storageLimit,
+      teams: uniqueTeams
     });
   } catch (error) {
     console.error("Auth Me Error:", error);
@@ -269,16 +295,16 @@ router.put('/me', authenticateToken, upload.single('avatar'), async (req, res) =
 
     const data = {};
     if (name) {
-        if (!isValidText(name, 100)) {
-            return res.status(400).json({ error: 'Name exceeds 100 characters' });
-        }
-        data.name = name;
+      if (!isValidText(name, 100)) {
+        return res.status(400).json({ error: 'Name exceeds 100 characters' });
+      }
+      data.name = name;
     }
     if (email) {
-        if (!isValidEmail(email)) {
-            return res.status(400).json({ error: 'Invalid email format' });
-        }
-        data.email = email;
+      if (!isValidEmail(email)) {
+        return res.status(400).json({ error: 'Invalid email format' });
+      }
+      data.email = email;
     }
 
     if (password) {
@@ -292,22 +318,22 @@ router.put('/me', authenticateToken, upload.single('avatar'), async (req, res) =
       }
 
       if (!isValidPassword(password)) {
-          return res.status(400).json({ error: 'Password must be 8-128 characters long and contain at least one letter and one number.' });
+        return res.status(400).json({ error: 'Password must be 8-128 characters long and contain at least one letter and one number.' });
       }
 
-       data.password = await bcrypt.hash(password, 10);
+      data.password = await bcrypt.hash(password, 10);
     }
 
     if (avatarPath) {
-        data.avatarPath = avatarPath;
-        // Optionally: delete old avatar if exists
-        const oldUser = await prisma.user.findUnique({ where: { id: userId } });
-        if (oldUser && oldUser.avatarPath) {
-            const oldPath = path.join(AVATAR_PATH, oldUser.avatarPath);
-            if (fs.existsSync(oldPath)) {
-                fs.unlinkSync(oldPath);
-            }
+      data.avatarPath = avatarPath;
+      // Optionally: delete old avatar if exists
+      const oldUser = await prisma.user.findUnique({ where: { id: userId } });
+      if (oldUser && oldUser.avatarPath) {
+        const oldPath = path.join(AVATAR_PATH, oldUser.avatarPath);
+        if (fs.existsSync(oldPath)) {
+          fs.unlinkSync(oldPath);
         }
+      }
     }
 
     const updatedUser = await prisma.user.update({
@@ -320,7 +346,7 @@ router.put('/me', authenticateToken, upload.single('avatar'), async (req, res) =
   } catch (error) {
     console.error("Auth Update Error:", error);
     if (error.code === 'P2002') { // Unique constraint violation (email)
-         return res.status(400).json({ error: 'Email already in use' });
+      return res.status(400).json({ error: 'Email already in use' });
     }
     res.status(500).json({ error: 'Failed to update profile' });
   }
@@ -331,7 +357,7 @@ router.post('/users', authenticateToken, requireAdmin, async (req, res) => {
   const { email, password, name } = req.body;
   try {
     if (!isValidEmail(email)) {
-        return res.status(400).json({ error: 'Invalid email format' });
+      return res.status(400).json({ error: 'Invalid email format' });
     }
 
     const existingUser = await prisma.user.findUnique({ where: { email } });
@@ -340,11 +366,11 @@ router.post('/users', authenticateToken, requireAdmin, async (req, res) => {
     }
 
     if (!isValidText(name, 100)) {
-        return res.status(400).json({ error: 'Name exceeds 100 characters' });
+      return res.status(400).json({ error: 'Name exceeds 100 characters' });
     }
 
     if (!isValidPassword(password)) {
-        return res.status(400).json({ error: 'Password must be 8-128 characters long and contain at least one letter and one number.' });
+      return res.status(400).json({ error: 'Password must be 8-128 characters long and contain at least one letter and one number.' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);

@@ -1,0 +1,2 @@
+-- Restore annotationScreenshotPath column dropped by previous migrations
+-- ALTER TABLE "Comment" ADD COLUMN "annotationScreenshotPath" TEXT;

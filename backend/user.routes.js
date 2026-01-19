@@ -50,6 +50,25 @@ router.get('/me/preferences', authenticateToken, async (req, res) => {
     }
 });
 
+// POST /api/users/me/preferences/unsubscribe-all
+router.post('/me/preferences/unsubscribe-all', authenticateToken, async (req, res) => {
+    const notificationTypes = ['MENTION', 'REPLY', 'PROJECT_CREATE', 'VIDEO_VERSION', 'STATUS_CHANGE', 'TEAM_ADD'];
+    try {
+        const operations = notificationTypes.map(type =>
+            prisma.notificationPreference.upsert({
+                where: { userId_type: { userId: req.user.id, type } },
+                update: { email: false },
+                create: { userId: req.user.id, type, email: false, inApp: true }
+            })
+        );
+        await prisma.$transaction(operations);
+        res.json({ message: 'Unsubscribed from all emails' });
+    } catch (error) {
+        console.error("Unsubscribe All Error:", error);
+        res.status(500).json({ error: 'Failed to unsubscribe' });
+    }
+});
+
 // PATCH /api/users/me/preferences (Notification Preferences)
 router.patch('/me/preferences', authenticateToken, async (req, res) => {
     const { type, channel, enabled } = req.body;
@@ -58,10 +77,11 @@ router.patch('/me/preferences', authenticateToken, async (req, res) => {
     if (!type || !channel) return res.status(400).json({ error: 'Type and channel required' });
 
     try {
-        // channel is 'email' or 'inApp'
+        // channel is 'email', 'inApp', or 'discord'
         const data = {};
         if (channel === 'email') data.email = enabled;
         if (channel === 'inApp') data.inApp = enabled;
+        if (channel === 'discord') data.discord = enabled;
 
         const pref = await prisma.notificationPreference.upsert({
             where: {
@@ -88,8 +108,8 @@ router.patch('/me/preferences', authenticateToken, async (req, res) => {
 router.patch('/me/client-preferences', authenticateToken, async (req, res) => {
     try {
         const user = await prisma.user.findUnique({
-             where: { id: req.user.id },
-             select: { preferences: true }
+            where: { id: req.user.id },
+            select: { preferences: true }
         });
 
         if (!user) return res.sendStatus(404);
@@ -97,7 +117,7 @@ router.patch('/me/client-preferences', authenticateToken, async (req, res) => {
         let currentPrefs = {};
         try {
             currentPrefs = user.preferences ? JSON.parse(user.preferences) : {};
-        } catch (e) {}
+        } catch (e) { }
 
         const newPrefs = { ...currentPrefs, ...req.body };
 

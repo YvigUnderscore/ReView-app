@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Clock } from 'lucide-react';
+import { AnimatePresence } from 'framer-motion';
 import { useHeader } from '../context/HeaderContext';
 import { useAuth } from '../context/AuthContext';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -251,27 +252,31 @@ const RecentActivity = () => {
                 isDestructive={confirmDialog.isDestructive}
             />
 
-            {showCreateModal && (
-                <CreateProjectModal
-                    onClose={() => setShowCreateModal(false)}
-                    onProjectCreated={(newProject) => {
-                        setProjects([newProject, ...projects]);
-                    }}
-                />
-            )}
+            <AnimatePresence>
+                {showCreateModal && (
+                    <CreateProjectModal
+                        onClose={() => setShowCreateModal(false)}
+                        onProjectCreated={(newProject) => {
+                            setProjects([newProject, ...projects]);
+                        }}
+                    />
+                )}
+            </AnimatePresence>
 
-            {editingProject && (
-                <EditProjectModal
-                    project={editingProject}
-                    onClose={() => setEditingProject(null)}
-                    onProjectUpdated={(updated) => {
-                        setProjects(projects.map(p => p.id === updated.id ? updated : p));
-                    }}
-                    onProjectDeleted={(id) => {
-                        setProjects(projects.filter(p => p.id !== id));
-                    }}
-                />
-            )}
+            <AnimatePresence>
+                {editingProject && (
+                    <EditProjectModal
+                        project={editingProject}
+                        onClose={() => setEditingProject(null)}
+                        onProjectUpdated={(updated) => {
+                            setProjects(projects.map(p => p.id === updated.id ? updated : p));
+                        }}
+                        onProjectDeleted={(id) => {
+                            setProjects(projects.filter(p => p.id !== id));
+                        }}
+                    />
+                )}
+            </AnimatePresence>
         </div>
     );
 };

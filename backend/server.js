@@ -1,6 +1,7 @@
 require('dotenv').config();
 require('./utils/bigint-patch'); // Apply BigInt JSON serialization patch
 const express = require('express');
+console.log('[DEBUG] server.js starting...');
 const cors = require('cors');
 const helmet = require('helmet');
 const path = require('path');
@@ -11,6 +12,7 @@ const { runCleanup } = require('./services/cleanupService');
 const { initEmailService } = require('./services/emailService');
 const { initCron } = require('./services/cronService');
 const { initSystemStats } = require('./services/systemStatsService');
+const { rateLimit } = require('./utils/rateLimiter');
 
 // Ensure storage directory exists
 const DATA_PATH = process.env.DATA_PATH || path.join(__dirname, 'storage');
@@ -72,6 +74,16 @@ app.use('/api/thumbnails', express.static(path.join(DATA_PATH, 'thumbnails')));
 app.use('/api/media/avatars', express.static(path.join(DATA_PATH, 'avatars')));
 app.use('/api/media/system', express.static(path.join(DATA_PATH, 'system')));
 
+// Global API Rate Limit: 300 requests per 15 minutes
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  message: { error: 'Too many requests from this IP, please try again later.' }
+});
+
+// Apply global rate limit to all /api routes
+app.use('/api', apiLimiter);
+
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/projects', projectRoutes);
@@ -91,6 +103,7 @@ app.get('/health', (req, res) => {
 });
 
 if (require.main === module) {
+  console.log(`[DEBUG] Attempting to listen on port ${PORT}...`);
   server.listen(PORT, () => {
     console.info(`Server running on port ${PORT}`);
   });

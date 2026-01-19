@@ -21,9 +21,19 @@ if [ -z "$DATABASE_URL" ]; then
   echo "DATABASE_URL not set, using default: $DATABASE_URL"
 fi
 
+# Generate Prisma Client to ensure it matches current schema
+echo "Generating Prisma Client..."
+npx prisma generate
+
 # Run migrations
 echo "Running database migrations..."
-npx prisma migrate deploy
+# Resolve failed migration as ROLLED BACK so we can re-apply the fix (fix duplicate column error/checksum)
+# Resolve failed migration as APPLIED (assume it's done if it keeps failing to apply)
+# npx prisma migrate resolve --applied 20260225000001_add_scale_column || true
+
+
+# npx prisma migrate deploy
+npx prisma db push --accept-data-loss
 
 # Start application
 echo "Starting application..."

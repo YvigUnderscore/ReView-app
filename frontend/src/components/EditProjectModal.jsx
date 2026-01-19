@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { X, AlertCircle, Trash2, Image as ImageIcon, Upload } from 'lucide-react';
+import { motion } from 'framer-motion';
 
 const EditProjectModal = ({ project, onClose, onProjectUpdated, onProjectDeleted }) => {
   const [activeTab, setActiveTab] = useState('details'); // details, thumbnail, version
@@ -128,8 +129,19 @@ const EditProjectModal = ({ project, onClose, onProjectUpdated, onProjectDeleted
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-card w-full max-w-lg rounded-lg border border-border shadow-xl relative flex flex-col max-h-[90vh]">
+    <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+    >
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0, y: 20 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.95, opacity: 0, y: 20 }}
+        transition={{ type: "spring", duration: 0.4, bounce: 0.3 }}
+        className="bg-card w-full max-w-lg rounded-lg border border-border shadow-xl relative flex flex-col max-h-[90vh]"
+      >
         <div className="flex items-center justify-between p-4 border-b border-border">
           <h2 className="text-xl font-bold">Edit Project</h2>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
@@ -330,8 +342,8 @@ const EditProjectModal = ({ project, onClose, onProjectUpdated, onProjectDeleted
                 </>
             )}
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 };
 

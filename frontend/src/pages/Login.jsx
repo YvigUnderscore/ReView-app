@@ -20,28 +20,28 @@ const Login = () => {
   const validateField = (name, value) => {
     let errorMsg = '';
     if (name === 'email') {
-       if (!value) errorMsg = 'Email is required';
-       else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) errorMsg = 'Please enter a valid email address';
+      if (!value) errorMsg = 'Email is required';
+      else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) errorMsg = 'Please enter a valid email address';
     }
     setFieldErrors(prev => ({ ...prev, [name]: errorMsg }));
   };
 
   const handleBlur = (e) => {
-      validateField(e.target.name, e.target.value);
+    validateField(e.target.name, e.target.value);
   };
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
     if (fieldErrors[e.target.name]) {
-        setFieldErrors(prev => ({ ...prev, [e.target.name]: '' }));
+      setFieldErrors(prev => ({ ...prev, [e.target.name]: '' }));
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (fieldErrors.email || !formData.email || !formData.password) {
-        validateField('email', formData.email);
-        return;
+      validateField('email', formData.email);
+      return;
     }
 
     setError('');
@@ -73,9 +73,9 @@ const Login = () => {
 
   if (authLoading) {
     return (
-       <div className="min-h-screen bg-background flex items-center justify-center">
-          <div className="text-muted-foreground">Initializing...</div>
-       </div>
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-muted-foreground">Initializing...</div>
+      </div>
     );
   }
 
@@ -83,9 +83,7 @@ const Login = () => {
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-md bg-card border border-border rounded-lg shadow-lg p-8">
         <div className="text-center mb-8">
-          <div className="w-12 h-12 bg-primary rounded-lg flex items-center justify-center text-primary-foreground font-bold text-xl mx-auto mb-4">
-            R
-          </div>
+          <img src="/logo_banner.png" alt="Logo" className="w-48 mx-auto mb-4 object-contain" />
           <h1 className="text-2xl font-bold">Welcome Back</h1>
           <p className="text-muted-foreground mt-2">
             Sign in to continue to your workspace.

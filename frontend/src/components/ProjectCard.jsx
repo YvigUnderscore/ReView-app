@@ -13,7 +13,11 @@ const ProjectCard = ({
 }) => {
     const { dateFormat } = useBranding();
     const [isMenuOpen, setIsMenuOpen] = useState(false);
-    const thumbUrl = project.thumbnailPath ? `/api/thumbnails/${project.thumbnailPath}` : null;
+    const thumbUrl = project.thumbnailPath ?
+        (project.thumbnailPath.includes('/') || project.thumbnailPath.includes('\\') ?
+            `/api/media/${project.thumbnailPath}` :
+            `/api/thumbnails/${project.thumbnailPath}`
+        ) : null;
 
     // Check for unread activity
     const lastVisited = localStorage.getItem(`last_visited_${project.id}`);
@@ -31,11 +35,10 @@ const ProjectCard = ({
 
     // Render STATUS BADGE
     const StatusBadge = ({ status, className }) => (
-        <span className={`text-[10px] px-1.5 py-0.5 rounded shadow-sm backdrop-blur-md border ${
-            status === 'CLIENT_REVIEW' ? 'bg-green-500/80 text-white border-transparent' :
+        <span className={`text-[10px] px-1.5 py-0.5 rounded shadow-sm backdrop-blur-md border ${status === 'CLIENT_REVIEW' ? 'bg-green-500/80 text-white border-transparent' :
             status === 'ALL_REVIEWS_DONE' ? 'bg-blue-500/80 text-white border-transparent' :
-            'bg-black/60 text-white border-white/10'
-        } ${className}`}>
+                'bg-black/60 text-white border-white/10'
+            } ${className}`}>
             {status.replace(/_/g, ' ')}
         </span>
     );
@@ -52,10 +55,10 @@ const ProjectCard = ({
                 <div className="border-t border-border my-1"></div>
 
                 <button onClick={(e) => { e.stopPropagation(); onEdit(project); setIsMenuOpen(false); }} className="text-left px-4 py-2 text-sm hover:bg-accent hover:text-accent-foreground w-full flex items-center gap-2 transition-colors">
-                    <Pencil size={14}/> Edit Project
+                    <Pencil size={14} /> Edit Project
                 </button>
                 <button onClick={(e) => { e.stopPropagation(); onDelete(project); setIsMenuOpen(false); }} className="text-left px-4 py-2 text-sm hover:bg-destructive/10 text-destructive w-full flex items-center gap-2 transition-colors">
-                    <Trash2 size={14}/> Delete
+                    <Trash2 size={14} /> Delete
                 </button>
             </div>
             <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setIsMenuOpen(false); }} />
@@ -68,7 +71,7 @@ const ProjectCard = ({
             <div className="group flex items-center gap-4 p-3 bg-card border border-border rounded-lg hover:border-primary/50 hover:shadow-md transition-all relative">
                 {isUnread && <div className="w-2 h-2 bg-red-500 rounded-full absolute top-2 right-2 border border-background z-20" title="New activity"></div>}
 
-                <Link to={project.team && project.team.slug && project.slug ? `/${project.team.slug}/project/${project.slug}` : `/project/${project.id}`} className="absolute inset-0 z-0" onClick={handleLinkClick}>
+                <Link to={project.team && project.team.slug && project.slug ? `/${project.team.slug}/${project.slug}` : `/project/${project.id}`} className="absolute inset-0 z-0" onClick={handleLinkClick}>
                     <span className="sr-only">View {project.name}</span>
                 </Link>
 
@@ -78,7 +81,7 @@ const ProjectCard = ({
                         <img src={thumbUrl} alt={project.name} className="w-full h-full object-cover" />
                     ) : (
                         <div className="text-white/50 text-xs">
-                             {project.threeDAssets?.length > 0 ? <Box size={20} /> : '▶️'}
+                            {project.threeDAssets?.length > 0 ? <Box size={20} /> : '▶️'}
                         </div>
                     )}
                 </div>
@@ -88,16 +91,16 @@ const ProjectCard = ({
                     <h3 className="font-semibold text-foreground truncate group-hover:text-primary transition-colors">{project.name}</h3>
                     <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
                         <span className="flex items-center gap-1">
-                             <Clock size={10} />
-                             {formatDate(project.updatedAt, dateFormat)}
+                            <Clock size={10} />
+                            {formatDate(project.updatedAt, dateFormat)}
                         </span>
                         {project.team && (
-                             <span className="px-1.5 py-0.5 rounded bg-muted/50 border border-border">
-                                 {project.team.name}
-                             </span>
+                            <span className="px-1.5 py-0.5 rounded bg-muted/50 border border-border">
+                                {project.team.name}
+                            </span>
                         )}
-                         {/* Avatar Stack in List View */}
-                         {project.team?.members && project.team.members.length > 0 && (
+                        {/* Avatar Stack in List View */}
+                        {project.team?.members && project.team.members.length > 0 && (
                             <div className="flex -space-x-1.5 items-center">
                                 {project.team.members.slice(0, 3).map(member => (
                                     <div key={member.id} className="w-4 h-4 rounded-full ring-1 ring-background bg-muted flex items-center justify-center text-[8px] overflow-hidden" title={member.name}>
@@ -139,13 +142,13 @@ const ProjectCard = ({
             {isUnread && (
                 <div className="absolute top-3 right-3 z-30 pointer-events-none">
                     <span className="relative flex h-3 w-3">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500 border-2 border-black"></span>
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500 border-2 border-black"></span>
                     </span>
                 </div>
             )}
 
-            <Link to={project.team && project.team.slug && project.slug ? `/${project.team.slug}/project/${project.slug}` : `/project/${project.id}`} className="absolute inset-0 z-10 rounded-xl" onClick={handleLinkClick}>
+            <Link to={project.team && project.team.slug && project.slug ? `/${project.team.slug}/${project.slug}` : `/project/${project.id}`} className="absolute inset-0 z-10 rounded-xl" onClick={handleLinkClick}>
                 <span className="sr-only">View project {project.name}</span>
             </Link>
 
@@ -180,7 +183,7 @@ const ProjectCard = ({
                 <div>
                     <h3 className="font-semibold text-foreground truncate group-hover:text-primary transition-colors pr-8">{project.name}</h3>
                     <div className="flex items-center justify-between mt-2">
-                         <span className="text-xs text-muted-foreground flex items-center gap-1">
+                        <span className="text-xs text-muted-foreground flex items-center gap-1">
                             <Clock size={12} />
                             {formatDate(project.updatedAt, dateFormat)}
                         </span>
@@ -217,7 +220,7 @@ const ProjectCard = ({
 
                 {/* Actions (Absolute to allow stacking over content if needed, but here spaced nicely) */}
                 <div className="absolute top-3 right-2 z-20">
-                     <button
+                    <button
                         onClick={handleMenuClick}
                         className={`p-1.5 text-muted-foreground hover:text-foreground bg-transparent hover:bg-muted/50 rounded-full transition-all opacity-100 md:opacity-0 md:group-hover:opacity-100 ${isMenuOpen ? 'opacity-100 bg-muted/50' : ''}`}
                     >
