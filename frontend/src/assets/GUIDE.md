@@ -6,7 +6,7 @@ Welcome to ReView! This guide will help you understand how to use the platform t
 
 Have questions or need help? Join our Discord community to connect with other users, get support, and stay updated on the latest features!
 
-👉 **[Join the ReView Discord](https://discord.gg/RFsD7hmPRq)**
+👉 **[Join the ReView Discord](https://discord.gg/vw7h6BqcNc)**
 
 ## Table of Contents
 

@@ -6,7 +6,7 @@ Je suis ravi d'annoncer ReView v1.1.0 ! Cette version apporte les prémices de l
 
 Restez connecté avec la communauté ReView ! Obtenez de l'aide, partagez vos retours et soyez le premier informé des nouvelles fonctionnalités.
 
-👉 **[Rejoindre le Discord ReView](https://discord.gg/RFsD7hmPRq)**
+👉 **[Rejoindre le Discord ReView](https://discord.gg/vw7h6BqcNc)**
 
 ## 🌍 Support Multilingue
 - **Documentation Multilingue** : Le Guide Utilisateur et les Notes de Mise à Jour sont désormais entièrement disponibles en anglais et en français !
