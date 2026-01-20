@@ -6,7 +6,7 @@
   <b>L'Outil Ultime de Révision Vidéo & Créative</b><br>
   Open-source, auto-hébergeable et précis.<br>
   v1.1.0 - La Mise à Jour Globale 🌍<br>
-  <a href="https://discord.gg/VXbA3NhyNb">
+  <a href="https://discord.gg/vw7h6BqcNc">
     <img src="https://img.shields.io/discord/1330663471017398292?color=5865F2&label=Discord&logo=discord&logoColor=white" alt="Discord Server" />
   </a>
   <br>

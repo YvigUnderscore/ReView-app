@@ -297,7 +297,7 @@ const LandingPage = () => {
                   <Link to="/register" className="w-full sm:w-auto px-8 py-3 bg-primary text-black font-bold rounded-lg hover:bg-primary/90 transition-all hover:scale-105">
                      Get Started Now
                   </Link>
-                  <a href="https://discord.gg/VXbA3NhyNb" target="_blank" rel="noopener noreferrer" className="w-full sm:w-auto px-8 py-3 bg-zinc-800 text-white font-medium rounded-lg hover:bg-zinc-700 transition-all hover:scale-105">
+                  <a href="https://discord.gg/vw7h6BqcNc" target="_blank" rel="noopener noreferrer" className="w-full sm:w-auto px-8 py-3 bg-zinc-800 text-white font-medium rounded-lg hover:bg-zinc-700 transition-all hover:scale-105">
                      Join Discord
                   </a>
                </div>

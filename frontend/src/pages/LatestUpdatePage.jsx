@@ -105,7 +105,7 @@ const LatestUpdatePage = () => {
                 </div>
               </div>
               <a
-                href="https://discord.gg/VXbA3NhyNb"
+                href="https://discord.gg/vw7h6BqcNc"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="px-6 py-3 bg-white text-[#5865F2] font-black rounded-lg hover:bg-white/90 transition-all hover:scale-105 shadow-lg whitespace-nowrap"

@@ -6,7 +6,7 @@
   <b>The Ultimate Video & Creative Review Tool</b><br>
   Open-source, self-hostable, and precise.<br>
   v1.1.0 - The Global Update 🌍<br>
-  <a href="https://discord.gg/VXbA3NhyNb">
+  <a href="https://discord.gg/vw7h6BqcNc">
     <img src="https://img.shields.io/discord/1330663471017398292?color=5865F2&label=Discord&logo=discord&logoColor=white" alt="Discord Server" />
   </a>
   <br>
