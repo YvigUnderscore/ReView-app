@@ -30,7 +30,10 @@ const storage = multer.diskStorage({
 
 const commentUpload = multer({
     storage: storage,
-    limits: { fileSize: 10 * 1024 * 1024 } // 10MB
+    limits: {
+        fileSize: 10 * 1024 * 1024, // 10MB for file attachments
+        fieldSize: 20 * 1024 * 1024  // 20MB for field values (annotations, screenshots in base64)
+    }
 });
 
 // GET /api/client/projects/:token

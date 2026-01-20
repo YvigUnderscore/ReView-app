@@ -2,6 +2,12 @@
 
 Welcome to ReView! This guide will help you understand how to use the platform to collaborate on video, image, and 3D projects.
 
+## 💬 Join Our Community
+
+Have questions or need help? Join our Discord community to connect with other users, get support, and stay updated on the latest features!
+
+👉 **[Join the ReView Discord](https://discord.gg/RFsD7hmPRq)**
+
 ## Table of Contents
 
 1. [Projects](#projects)

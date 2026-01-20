@@ -2,6 +2,12 @@
 
 Bienvenue sur ReView ! Ce guide vous aidera à comprendre comment utiliser la plateforme pour collaborer sur des projets vidéo, image et 3D.
 
+## 💬 Rejoignez Notre Communauté
+
+Vous avez des questions ou besoin d'aide ? Rejoignez notre communauté Discord pour échanger avec d'autres utilisateurs, obtenir de l'aide et rester informé des dernières fonctionnalités !
+
+👉 **[Rejoindre le Discord ReView](https://discord.gg/RFsD7hmPRq)**
+
 ## Table des Matières
 
 1. [Projets](#projets)

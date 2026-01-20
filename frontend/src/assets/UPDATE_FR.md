@@ -2,6 +2,12 @@
 
 Je suis ravi d'annoncer ReView v1.1.0 ! Cette version apporte les prémices de l'internationalisation, une refonte massive de l'expérience de révision 3D, ainsi que d'importantes améliorations de stabilité.
 
+## 💬 Rejoignez Notre Communauté Discord
+
+Restez connecté avec la communauté ReView ! Obtenez de l'aide, partagez vos retours et soyez le premier informé des nouvelles fonctionnalités.
+
+👉 **[Rejoindre le Discord ReView](https://discord.gg/RFsD7hmPRq)**
+
 ## 🌍 Support Multilingue
 - **Documentation Multilingue** : Le Guide Utilisateur et les Notes de Mise à Jour sont désormais entièrement disponibles en anglais et en français !
 
