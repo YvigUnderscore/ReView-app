@@ -71,13 +71,15 @@ npm install
 
 See the [Installation Guide](./installation.md) for full deployment instructions.
 
-## 🛠 Tech Stack
+## Star History
 
-Built with modern, robust technologies:
-- **Frontend**: React, Vite, TailwindCSS, Framer Motion
-- **Backend**: Node.js, Express, Socket.IO, Prisma
-- **Media**: FFmpeg, Google <model-viewer>
-
+<a href="https://www.star-history.com/#YvigUnderscore/ReView-app&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=YvigUnderscore/ReView-app&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=YvigUnderscore/ReView-app&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=YvigUnderscore/ReView-app&type=date&legend=top-left" />
+ </picture>
+</a>
 ## 🙏 Acknowledgments & Licenses
 
 ReView wouldn't be possible without these incredible open-source projects. A huge thank you to their creators and contributors!
