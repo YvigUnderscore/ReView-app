@@ -4,7 +4,7 @@ import { X, ArrowLeft, ArrowRight } from 'lucide-react';
 import { isPointInShape, moveShape } from '../utils/annotationUtils';
 import DrawingToolbar from './DrawingToolbar';
 
-const ImageViewer = forwardRef(({ src, onNext, onPrev, hasPrev, hasNext, annotations, onAnnotationSave, viewingAnnotation, isDrawingModeTrigger, isReadOnly, activeImageIndex, totalImages, onImageChange, onReviewSubmit, onDrawingModeChange }, ref) => {
+const ImageViewer = forwardRef(({ src, onNext, onPrev, hasPrev, hasNext, annotations, onAnnotationSave, viewingAnnotation, viewingCommentId, isDrawingModeTrigger, isReadOnly, activeImageIndex, totalImages, onImageChange, onReviewSubmit, onDrawingModeChange }, ref) => {
     const containerRef = useRef(null);
     const canvasRef = useRef(null);
     const imageRef = useRef(null);
@@ -20,6 +20,7 @@ const ImageViewer = forwardRef(({ src, onNext, onPrev, hasPrev, hasNext, annotat
     const [lastPos, setLastPos] = useState({ x: 0, y: 0 }); // Normalized last pos for dragging
     const [currentAnnotation, setCurrentAnnotation] = useState(null);
     const [localAnnotations, setLocalAnnotations] = useState([]); // Annotations for current session/image
+    const [currentViewingCommentId, setCurrentViewingCommentId] = useState(null);
     const [draggingAnnotation, setDraggingAnnotation] = useState(null); // The annotation being moved
     const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
     const [hoveredShapeIndex, setHoveredShapeIndex] = useState(-1);
@@ -384,13 +385,20 @@ const ImageViewer = forwardRef(({ src, onNext, onPrev, hasPrev, hasNext, annotat
 
     // Sync annotations from props (Viewing saved annotations)
     useEffect(() => {
-        if (viewingAnnotation) {
-            setLocalAnnotations(viewingAnnotation);
-        } else if (!isDrawingMode) {
-            // Clear annotations when navigating to a comment without annotations
-            setLocalAnnotations([]);
+        // If viewingCommentId is provided, use strict ID-based comparison
+        // Otherwise, always sync based on viewingAnnotation changes
+        const shouldUpdate = viewingCommentId !== undefined
+            ? viewingCommentId !== currentViewingCommentId
+            : true;
+
+        if (shouldUpdate) {
+            if (viewingCommentId !== undefined) {
+                setCurrentViewingCommentId(viewingCommentId);
+            }
+            // ALWAYS sync annotations with viewingAnnotation prop
+            setLocalAnnotations(viewingAnnotation || []);
         }
-    }, [viewingAnnotation, isDrawingMode, src]);
+    }, [viewingAnnotation, viewingCommentId, currentViewingCommentId]);
 
     // Redraw on changes
     useEffect(() => {
@@ -401,7 +409,10 @@ const ImageViewer = forwardRef(({ src, onNext, onPrev, hasPrev, hasNext, annotat
     useEffect(() => {
         if (isDrawingModeTrigger && !isReadOnly) {
             setIsDrawingMode(true);
-            setLocalAnnotations([]); // Clear previous for new drawing
+            // Only clear if we don't already have annotations to edit
+            if (localAnnotations.length === 0) {
+                setLocalAnnotations([]);
+            }
             setTool('pointer');
         }
     }, [isDrawingModeTrigger, isReadOnly]);

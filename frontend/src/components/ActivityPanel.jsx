@@ -902,35 +902,37 @@ const ActivityPanel = ({
                                     onEdit={(c) => {
                                         setEditingCommentId(c.id);
                                         setEditContent(c.content);
-                                        // Load existing annotations if present
-                                        if (c.annotation) {
+                                        // Load existing annotations using the same mechanism as viewing comments
+                                        if (c.annotation && onCommentClick) {
                                             try {
                                                 const existingAnnotations = JSON.parse(c.annotation);
-                                                // Trigger annotation loading via parent callback
-                                                if (onToggleDrawing) onToggleDrawing(true);
-                                                // Load annotations into viewer after a small delay
+                                                // Use onCommentClick to load annotations into viewer and enable drawing mode
+                                                onCommentClick(c.timestamp, existingAnnotations, c.id, c);
+                                                // Enable drawing mode after annotations are loaded
                                                 setTimeout(() => {
-                                                    if (getAnnotations) {
-                                                        // Access viewer ref through parent component
-                                                        // This requires viewer to have loadAnnotations method
-                                                        window.dispatchEvent(new CustomEvent('loadCommentAnnotations', {
-                                                            detail: { annotations: existingAnnotations }
-                                                        }));
-                                                    }
+                                                    if (onToggleDrawing) onToggleDrawing(true);
                                                 }, 100);
                                             } catch (e) {
-                                                console.error('Failed to load annotations:', e);
+                                                console.error('Failed to load annotations for editing:', e);
                                             }
+                                        } else if (onToggleDrawing) {
+                                            // No annotations, just enable drawing mode
+                                            onToggleDrawing(true);
                                         }
                                     }}
                                     isEditing={editingCommentId === comment.id}
                                     editContent={editContent}
                                     setEditContent={setEditContent}
                                     onCancelEdit={() => {
+                                        const originalComment = comments.find(c => c.id === editingCommentId);
                                         setEditingCommentId(null);
                                         setEditContent('');
-                                        // Clear annotations if in drawing mode
-                                        if (onClearAnnotations) onClearAnnotations();
+                                        // Restore original comment display (including annotations)
+                                        if (originalComment && onCommentClick) {
+                                            const annos = originalComment.annotation ? JSON.parse(originalComment.annotation) : null;
+                                            onCommentClick(originalComment.timestamp, annos, originalComment.id, originalComment);
+                                        }
+                                        // Exit drawing mode
                                         if (onToggleDrawing) onToggleDrawing(false);
                                     }}
                                     onSaveEdit={async (id) => {
@@ -967,6 +969,14 @@ const ActivityPanel = ({
                                                 if (onCommentUpdated) onCommentUpdated(updated);
                                                 setEditingCommentId(null);
                                                 setEditContent('');
+                                                // Clean up: exit drawing mode and clear annotations
+                                                if (onToggleDrawing) onToggleDrawing(false);
+                                                if (onClearAnnotations) onClearAnnotations();
+                                                // Show updated comment with its annotations
+                                                if (onCommentClick && updated) {
+                                                    const annos = updated.annotation ? JSON.parse(updated.annotation) : null;
+                                                    onCommentClick(updated.timestamp, annos, updated.id, updated);
+                                                }
                                                 toast.success('Comment updated');
                                             } else {
                                                 toast.error('Failed to update comment');

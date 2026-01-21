@@ -98,7 +98,7 @@ const CameraController = ({ cameraState, onCameraChange, onInteractionStart }) =
     />;
 };
 
-const ThreeDViewer = forwardRef(({ src, onAnnotationSave, viewingAnnotation, isDrawingModeTrigger, onCameraChange, onCameraInteractionStart }, ref) => {
+const ThreeDViewer = forwardRef(({ src, onAnnotationSave, viewingAnnotation, viewingCommentId, isDrawingModeTrigger, onCameraChange, onCameraInteractionStart }, ref) => {
     const [materialMode, setMaterialMode] = useState('standard'); // standard, wireframe, matcap
     const [showGrid, setShowGrid] = useState(true);
     const [cameraState, setCameraState] = useState(null);
@@ -106,6 +106,7 @@ const ThreeDViewer = forwardRef(({ src, onAnnotationSave, viewingAnnotation, isD
     // Annotation State (2D Overlay)
     const [isDrawingMode, setIsDrawingMode] = useState(false);
     const [annotations, setAnnotations] = useState([]);
+    const [currentViewingCommentId, setCurrentViewingCommentId] = useState(null);
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
     const glRef = useRef(null);
@@ -365,11 +366,31 @@ const ThreeDViewer = forwardRef(({ src, onAnnotationSave, viewingAnnotation, isD
 
     }, [annotations, currentAnnotation, viewingAnnotation, isDrawingMode, drawShape]);
 
+    // Sync annotations from props (Viewing saved annotations)
+    useEffect(() => {
+        // If viewingCommentId is provided, use strict ID-based comparison
+        // Otherwise, always sync based on viewingAnnotation changes
+        const shouldUpdate = viewingCommentId !== undefined
+            ? viewingCommentId !== currentViewingCommentId
+            : true;
+
+        if (shouldUpdate) {
+            if (viewingCommentId !== undefined) {
+                setCurrentViewingCommentId(viewingCommentId);
+            }
+            // ALWAYS sync annotations with viewingAnnotation prop
+            setAnnotations(viewingAnnotation || []);
+        }
+    }, [viewingAnnotation, viewingCommentId, currentViewingCommentId]);
+
     // Handle Trigger
     useEffect(() => {
         if (isDrawingModeTrigger) {
             setIsDrawingMode(true);
-            setAnnotations([]);
+            // Only clear if we don't already have annotations to edit
+            if (annotations.length === 0) {
+                setAnnotations([]);
+            }
         }
     }, [isDrawingModeTrigger]);
 
