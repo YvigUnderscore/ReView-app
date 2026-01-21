@@ -317,7 +317,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
         res.json({ message: 'Team deleted successfully' });
     } catch (error) {
         console.error("Delete team error:", error);
-        res.status(500).json({ error: 'Failed to delete team: ' + error.message });
+        res.status(500).json({ error: 'Failed to delete team' });
     }
 });
 
