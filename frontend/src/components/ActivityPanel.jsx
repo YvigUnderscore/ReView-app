@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
-import { Send, Image as ImageIcon, X, Trash2, Reply, Smile, Check, Eye, EyeOff, UserPlus, Download, Bell, BellOff, Minimize2, Video, FileText, Table, Pencil, Save, Circle, CheckCircle } from 'lucide-react';
+import { Send, Image as ImageIcon, X, Trash2, Reply, Smile, Check, Eye, EyeOff, UserPlus, Download, Bell, BellOff, Minimize2, Video, FileText, Table, Pencil, Save, Circle, CheckCircle, PenLine } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import MentionsInput from './MentionsInput';
 import { formatDate } from '../lib/dateUtils';
@@ -288,6 +288,14 @@ const CommentItem = ({ comment, onCommentClick, onToggleResolved, onToggleVisibi
                                 {formatTime(comment.timestamp)}
                                 {comment.duration && ` - ${formatTime(comment.timestamp + comment.duration)}`}
                             </span>
+                            {comment.isEdited && (
+                                <span
+                                    className="text-[10px] text-muted-foreground flex items-center gap-0.5"
+                                    title="Edited comment"
+                                >
+                                    <PenLine size={10} />
+                                </span>
+                            )}
                         </div>
                         <span className="text-[10px] text-muted-foreground">
                             {formatDate(comment.createdAt, dateFormat)}
@@ -894,6 +902,26 @@ const ActivityPanel = ({
                                     onEdit={(c) => {
                                         setEditingCommentId(c.id);
                                         setEditContent(c.content);
+                                        // Load existing annotations if present
+                                        if (c.annotation) {
+                                            try {
+                                                const existingAnnotations = JSON.parse(c.annotation);
+                                                // Trigger annotation loading via parent callback
+                                                if (onToggleDrawing) onToggleDrawing(true);
+                                                // Load annotations into viewer after a small delay
+                                                setTimeout(() => {
+                                                    if (getAnnotations) {
+                                                        // Access viewer ref through parent component
+                                                        // This requires viewer to have loadAnnotations method
+                                                        window.dispatchEvent(new CustomEvent('loadCommentAnnotations', {
+                                                            detail: { annotations: existingAnnotations }
+                                                        }));
+                                                    }
+                                                }, 100);
+                                            } catch (e) {
+                                                console.error('Failed to load annotations:', e);
+                                            }
+                                        }
                                     }}
                                     isEditing={editingCommentId === comment.id}
                                     editContent={editContent}
@@ -901,12 +929,24 @@ const ActivityPanel = ({
                                     onCancelEdit={() => {
                                         setEditingCommentId(null);
                                         setEditContent('');
+                                        // Clear annotations if in drawing mode
+                                        if (onClearAnnotations) onClearAnnotations();
+                                        if (onToggleDrawing) onToggleDrawing(false);
                                     }}
                                     onSaveEdit={async (id) => {
                                         try {
                                             const url = isGuest
                                                 ? `/api/client/projects/${clientToken}/comments/${id}`
                                                 : `/api/projects/comments/${id}`;
+
+                                            // Get current annotations from viewer
+                                            let currentAnnotations = null;
+                                            if (getAnnotations) {
+                                                const annos = getAnnotations();
+                                                if (annos && annos.length > 0) {
+                                                    currentAnnotations = JSON.stringify(annos);
+                                                }
+                                            }
 
                                             // Handle update
                                             const res = await fetch(url, {
@@ -915,7 +955,11 @@ const ActivityPanel = ({
                                                     'Content-Type': 'application/json',
                                                     ...(!isGuest && { 'Authorization': `Bearer ${localStorage.getItem('token')}` })
                                                 },
-                                                body: JSON.stringify({ content: editContent, guestName: isGuest ? guestName : undefined })
+                                                body: JSON.stringify({
+                                                    content: editContent,
+                                                    annotation: currentAnnotations,
+                                                    guestName: isGuest ? guestName : undefined
+                                                })
                                             });
 
                                             if (res.ok) {

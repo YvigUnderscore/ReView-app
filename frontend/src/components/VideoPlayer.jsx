@@ -193,7 +193,17 @@ const VideoPlayer = forwardRef(({ src, compareSrc, compareAudioEnabled, onTimeUp
             canUndo: historyIndex > 0
         }),
         undoAnnotation: handleUndo,
-        sendAnnotations: handleSendReview
+        sendAnnotations: handleSendReview,
+        loadAnnotations: (annotationsArray) => {
+            if (Array.isArray(annotationsArray)) {
+                setAnnotations(annotationsArray);
+                setIsDrawingMode(true);
+                if (onDrawingModeChange) onDrawingModeChange(true);
+                videoRef.current?.pause();
+                setIsPlaying(false);
+                updateCanvasLayout();
+            }
+        }
     }));
 
     const handleVideoPlay = () => {
