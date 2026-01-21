@@ -42,6 +42,17 @@ model User {
   uploadedThreeDAssets ThreeDAsset[]
   uploadedImageBundles ImageBundle[]
   emailQueue EmailQueue[]
+  passwordResets PasswordReset[]
+}
+
+model PasswordReset {
+  id        Int      @id @default(autoincrement())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+  token     String   @unique
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
 }
 
 model NotificationPreference {
@@ -242,7 +253,7 @@ model Comment {
   hotspots    String?  // JSON string for 3D hotspots (point, surface, dimension)
   screenshotPath String? // Path to the screenshot file
   annotationScreenshotPath String? // Path to the burned-in annotation screenshot
-  attachmentPath String? // Path to the user uploaded attachment
+  attachmentPaths String? // JSON array of attachment paths (max 10 images, 5MB each)
   isResolved Boolean  @default(false)
   isVisibleToClient Boolean @default(false)
   isEdited   Boolean  @default(false)

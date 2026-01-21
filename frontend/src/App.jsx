@@ -10,6 +10,8 @@ import ActivityPanel from './components/ActivityPanel';
 import Login from './pages/Login';
 import Setup from './pages/Setup';
 import Register from './pages/Register';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 import LandingPage from './pages/LandingPage';
 import AdminDashboard from './pages/Admin/AdminDashboard';
 import TeamDashboard from './pages/Team/TeamDashboard';
@@ -1575,6 +1577,16 @@ const AppRoutes = () => {
                     <Route path="/register" element={
                         <PageTransition>
                             {user ? <Navigate to="/dashboard" replace /> : <Register />}
+                        </PageTransition>
+                    } />
+                    <Route path="/forgot-password" element={
+                        <PageTransition>
+                            {user ? <Navigate to="/dashboard" replace /> : <ForgotPasswordPage />}
+                        </PageTransition>
+                    } />
+                    <Route path="/reset-password" element={
+                        <PageTransition>
+                            {user ? <Navigate to="/dashboard" replace /> : <ResetPasswordPage />}
                         </PageTransition>
                     } />
                     <Route path="/review/:token" element={

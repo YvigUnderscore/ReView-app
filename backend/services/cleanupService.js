@@ -38,10 +38,10 @@ async function runCleanup() {
                 // 1. Videos
                 const videos = await prisma.video.findMany({ where: { projectId } });
                 for (const video of videos) {
-                   teamBytesToRelease += Number(video.size);
-                   if (video.path && fs.existsSync(video.path)) {
-                       try { fs.unlinkSync(video.path); } catch(e) {}
-                   }
+                    teamBytesToRelease += Number(video.size);
+                    if (video.path && fs.existsSync(video.path)) {
+                        try { fs.unlinkSync(video.path); } catch (e) { }
+                    }
                 }
 
                 // 2. ThreeDAssets
@@ -49,7 +49,7 @@ async function runCleanup() {
                 for (const asset of assets) {
                     teamBytesToRelease += Number(asset.size);
                     if (asset.path && fs.existsSync(asset.path)) {
-                        try { fs.unlinkSync(asset.path); } catch(e) {}
+                        try { fs.unlinkSync(asset.path); } catch (e) { }
                     }
                 }
 
@@ -59,7 +59,7 @@ async function runCleanup() {
                     for (const img of bundle.images) {
                         teamBytesToRelease += Number(img.size);
                         if (img.path && fs.existsSync(img.path)) {
-                            try { fs.unlinkSync(img.path); } catch(e) {}
+                            try { fs.unlinkSync(img.path); } catch (e) { }
                         }
                     }
                 }
@@ -85,13 +85,18 @@ async function runCleanup() {
                         await updateStorage({ userId: c.userId, teamId: null, deltaBytes: -Number(c.size) });
                     }
                     // Delete files
-                    if (c.attachmentPath) {
-                         const p = path.join(DATA_PATH, 'media', c.attachmentPath);
-                         try { if(fs.existsSync(p)) fs.unlinkSync(p); } catch(e) {}
+                    if (c.attachmentPaths) {
+                        try {
+                            const paths = JSON.parse(c.attachmentPaths);
+                            for (const attachPath of paths) {
+                                const p = path.join(DATA_PATH, 'media', attachPath);
+                                try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch (e) { }
+                            }
+                        } catch (e) { }
                     }
                     if (c.screenshotPath) {
-                         const p = path.join(DATA_PATH, 'comments', c.screenshotPath);
-                         try { if(fs.existsSync(p)) fs.unlinkSync(p); } catch(e) {}
+                        const p = path.join(DATA_PATH, 'comments', c.screenshotPath);
+                        try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch (e) { }
                     }
                 }
 

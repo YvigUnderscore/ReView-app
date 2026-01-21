@@ -68,7 +68,7 @@ const drawAnnotation = (doc, annotationJson, x, y, width, height) => {
                         doc.lineTo(p.x, p.y);
                     }
                     if (shape.tool !== 'eraser') {
-                         doc.stroke();
+                        doc.stroke();
                     }
                 }
             } else {
@@ -80,7 +80,7 @@ const drawAnnotation = (doc, annotationJson, x, y, width, height) => {
                 if (shape.tool === 'rect') {
                     doc.rect(p.x, p.y, w_, h_).stroke();
                 } else if (shape.tool === 'circle') {
-                    doc.ellipse(p.x + w_/2, p.y + h_/2, Math.abs(w_/2), Math.abs(h_/2)).stroke();
+                    doc.ellipse(p.x + w_ / 2, p.y + h_ / 2, Math.abs(w_ / 2), Math.abs(h_ / 2)).stroke();
                 } else if (shape.tool === 'line') {
                     doc.moveTo(p.x, p.y).lineTo(p.x + w_, p.y + h_).stroke();
                 } else if (shape.tool === 'arrow') {
@@ -91,30 +91,30 @@ const drawAnnotation = (doc, annotationJson, x, y, width, height) => {
                     const toy = p.y + h_;
 
                     doc.moveTo(tox, toy)
-                       .lineTo(tox - headlen * Math.cos(angle - Math.PI / 6), toy - headlen * Math.sin(angle - Math.PI / 6))
-                       .stroke();
+                        .lineTo(tox - headlen * Math.cos(angle - Math.PI / 6), toy - headlen * Math.sin(angle - Math.PI / 6))
+                        .stroke();
                     doc.moveTo(tox, toy)
-                       .lineTo(tox - headlen * Math.cos(angle + Math.PI / 6), toy - headlen * Math.sin(angle + Math.PI / 6))
-                       .stroke();
+                        .lineTo(tox - headlen * Math.cos(angle + Math.PI / 6), toy - headlen * Math.sin(angle + Math.PI / 6))
+                        .stroke();
 
                 } else if (shape.tool === 'text') {
-                     doc.fontSize((shape.strokeWidth || 10) * 3 * (width/1920))
+                    doc.fontSize((shape.strokeWidth || 10) * 3 * (width / 1920))
                         .text(shape.text || 'Text', p.x, p.y);
                 } else if (shape.tool === 'bubble') {
                     doc.roundedRect(p.x, p.y, w_, h_, 10).stroke();
                     doc.moveTo(p.x + w_ * 0.2, p.y + h_)
-                       .lineTo(p.x + w_ * 0.2 - 10, p.y + h_ + 20)
-                       .lineTo(p.x + w_ * 0.2 + 10, p.y + h_)
-                       .stroke();
+                        .lineTo(p.x + w_ * 0.2 - 10, p.y + h_ + 20)
+                        .lineTo(p.x + w_ * 0.2 + 10, p.y + h_)
+                        .stroke();
                 } else if (shape.tool === 'curve') {
-                     const startX = p.x; const startY = p.y;
-                     const endX = p.x + w_; const endY = p.y + h_;
-                     const midX = (startX + endX) / 2;
-                     const midY = (startY + endY) / 2;
-                     const cpX = midX;
-                     const cpY = midY - Math.abs(w_) * 0.5;
+                    const startX = p.x; const startY = p.y;
+                    const endX = p.x + w_; const endY = p.y + h_;
+                    const midX = (startX + endX) / 2;
+                    const midY = (startY + endY) / 2;
+                    const cpX = midX;
+                    const cpY = midY - Math.abs(w_) * 0.5;
 
-                     doc.moveTo(startX, startY)
+                    doc.moveTo(startX, startY)
                         .quadraticCurveTo(cpX, cpY, endX, endY)
                         .stroke();
                 }
@@ -132,7 +132,7 @@ const drawAnnotation = (doc, annotationJson, x, y, width, height) => {
 const generateCommentScreenshot = (videoPath, timestamp, outputDir) => {
     return new Promise((resolve, reject) => {
         if (!fs.existsSync(outputDir)) {
-             fs.mkdirSync(outputDir, { recursive: true });
+            fs.mkdirSync(outputDir, { recursive: true });
         }
         const filename = `shot-${crypto.randomUUID()}.jpg`;
         ffmpeg(videoPath)
@@ -192,7 +192,7 @@ const generatePDF = async (project, mediaObject, comments, res, settings = {}) =
     const cleanup = () => {
         tempFiles.forEach(file => {
             if (fs.existsSync(file)) {
-                try { fs.unlinkSync(file); } catch(e) {}
+                try { fs.unlinkSync(file); } catch (e) { }
             }
         });
     };
@@ -203,9 +203,9 @@ const generatePDF = async (project, mediaObject, comments, res, settings = {}) =
     // Set Background Color Helper
     const fillBackground = () => {
         doc.save()
-           .rect(0, 0, doc.page.width, doc.page.height)
-           .fill(THEME.bg)
-           .restore();
+            .rect(0, 0, doc.page.width, doc.page.height)
+            .fill(THEME.bg)
+            .restore();
     };
 
     // Register Font
@@ -238,18 +238,18 @@ const generatePDF = async (project, mediaObject, comments, res, settings = {}) =
         // Thumbnail
         let thumbPath = null;
         if (project.thumbnailPath) {
-             thumbPath = path.join(DATA_PATH, 'thumbnails', project.thumbnailPath);
+            thumbPath = path.join(DATA_PATH, 'thumbnails', project.thumbnailPath);
         }
 
         if (thumbPath && fs.existsSync(thumbPath)) {
-             const imgWidth = 400;
-             const x = (doc.page.width - imgWidth) / 2;
-             try {
+            const imgWidth = 400;
+            const x = (doc.page.width - imgWidth) / 2;
+            try {
                 doc.image(thumbPath, x, doc.y, { width: imgWidth });
                 doc.y += 240; // Approx height + margin
-             } catch(e) {
-                 doc.text("[Thumbnail Error]", { align: 'center' });
-             }
+            } catch (e) {
+                doc.text("[Thumbnail Error]", { align: 'center' });
+            }
         }
 
         doc.moveDown(2);
@@ -259,23 +259,23 @@ const generatePDF = async (project, mediaObject, comments, res, settings = {}) =
         const metaY = doc.y;
 
         const drawMeta = (label, value, x) => {
-             doc.font(fs.existsSync(fontPath) ? fontPath : 'Helvetica-Bold').text(label, x, metaY, { width: 150, align: 'center' });
-             doc.font(fs.existsSync(fontPath) ? fontPath : 'Helvetica').text(value, x, metaY + 20, { width: 150, align: 'center' });
+            doc.font(fs.existsSync(fontPath) ? fontPath : 'Helvetica-Bold').text(label, x, metaY, { width: 150, align: 'center' });
+            doc.font(fs.existsSync(fontPath) ? fontPath : 'Helvetica').text(value, x, metaY + 20, { width: 150, align: 'center' });
         };
 
         // Version
-        drawMeta('Version', mediaObject.versionName || 'V01', doc.page.width/2 - 200);
+        drawMeta('Version', mediaObject.versionName || 'V01', doc.page.width / 2 - 200);
 
         // Date
-        drawMeta('Date', formatDate(new Date(), dateFormat), doc.page.width/2 + 50);
+        drawMeta('Date', formatDate(new Date(), dateFormat), doc.page.width / 2 + 50);
 
         // Video Specific Metadata
         if (!mediaObject.images) {
             doc.moveDown(4);
             const vY = doc.y;
-            if (mediaObject.resolution) drawMeta('Resolution', mediaObject.resolution, doc.page.width/2 - 200); // Need to pass resolution
-            if (mediaObject.frameRate) drawMeta('Framerate', `${mediaObject.frameRate} fps`, doc.page.width/2 - 50);
-            if (mediaObject.duration) drawMeta('Duration', formatTime(mediaObject.duration, mediaObject.frameRate), doc.page.width/2 + 100);
+            if (mediaObject.resolution) drawMeta('Resolution', mediaObject.resolution, doc.page.width / 2 - 200); // Need to pass resolution
+            if (mediaObject.frameRate) drawMeta('Framerate', `${mediaObject.frameRate} fps`, doc.page.width / 2 - 50);
+            if (mediaObject.duration) drawMeta('Duration', formatTime(mediaObject.duration, mediaObject.frameRate), doc.page.width / 2 + 100);
         }
     };
 
@@ -301,59 +301,59 @@ const generatePDF = async (project, mediaObject, comments, res, settings = {}) =
         const maxW = cardW - (padding * 2);
         const maxH = 500; // Cap height for single images
         const shotWidth = (maxW - 10) / 3;
-        const shotHeight = shotWidth * (9/16);
+        const shotHeight = shotWidth * (9 / 16);
 
         let imageAreaHeight = 0;
         let preparedImage = null; // for single image case
 
         if (isRange) {
-             imageAreaHeight = shotHeight + 20; // + label/margin
+            imageAreaHeight = shotHeight + 20; // + label/margin
         } else if (hasImage || comment.screenshotPath) {
-             // For single image (video screenshot or image project), we want full scale.
-             // We need to determine the height before drawing the card background.
-             let imageToDraw = null;
-             if (comment.screenshotPath) {
-                 // 3D Screenshot or explicit screenshot
-                 imageToDraw = path.join(DATA_PATH, 'comments', comment.screenshotPath);
-             } else if (isThreeD) {
-                 // If 3D and no screenshotPath, we don't have an image to show.
-                 // We skip generation because ffmpeg doesn't support GLB.
-                 imageToDraw = null;
-             } else if (isVideo) {
-                 imageToDraw = await generateCommentScreenshot(mediaPath, comment.timestamp, tempDir);
-                 if (imageToDraw) tempFiles.push(imageToDraw);
-             } else if (comment.annotation) {
-                 // For Image projects
-                 imageToDraw = mediaPath;
-             }
+            // For single image (video screenshot or image project), we want full scale.
+            // We need to determine the height before drawing the card background.
+            let imageToDraw = null;
+            if (comment.screenshotPath) {
+                // 3D Screenshot or explicit screenshot
+                imageToDraw = path.join(DATA_PATH, 'comments', comment.screenshotPath);
+            } else if (isThreeD) {
+                // If 3D and no screenshotPath, we don't have an image to show.
+                // We skip generation because ffmpeg doesn't support GLB.
+                imageToDraw = null;
+            } else if (isVideo) {
+                imageToDraw = await generateCommentScreenshot(mediaPath, comment.timestamp, tempDir);
+                if (imageToDraw) tempFiles.push(imageToDraw);
+            } else if (comment.annotation) {
+                // For Image projects
+                imageToDraw = mediaPath;
+            }
 
-             if (imageToDraw && fs.existsSync(imageToDraw)) {
-                 try {
-                     const imgObj = doc.openImage(imageToDraw);
-                     const scale = Math.min(maxW / imgObj.width, maxH / imgObj.height);
-                     const renderW = imgObj.width * scale;
-                     const renderH = imgObj.height * scale;
+            if (imageToDraw && fs.existsSync(imageToDraw)) {
+                try {
+                    const imgObj = doc.openImage(imageToDraw);
+                    const scale = Math.min(maxW / imgObj.width, maxH / imgObj.height);
+                    const renderW = imgObj.width * scale;
+                    const renderH = imgObj.height * scale;
 
-                     preparedImage = {
-                         path: imageToDraw,
-                         width: renderW,
-                         height: renderH,
-                         obj: imgObj
-                     };
-                     imageAreaHeight = renderH;
-                 } catch (e) {
-                     // Fallback height if error
-                     imageAreaHeight = 200;
-                 }
-             } else {
-                 // Fallback if file missing
-                 if (isThreeD && !comment.screenshotPath) {
-                     // For 3D without screenshot, we reserve small space for "No Preview"
-                     imageAreaHeight = 30;
-                 } else {
-                     imageAreaHeight = 20;
-                 }
-             }
+                    preparedImage = {
+                        path: imageToDraw,
+                        width: renderW,
+                        height: renderH,
+                        obj: imgObj
+                    };
+                    imageAreaHeight = renderH;
+                } catch (e) {
+                    // Fallback height if error
+                    imageAreaHeight = 200;
+                }
+            } else {
+                // Fallback if file missing
+                if (isThreeD && !comment.screenshotPath) {
+                    // For 3D without screenshot, we reserve small space for "No Preview"
+                    imageAreaHeight = 30;
+                } else {
+                    imageAreaHeight = 20;
+                }
+            }
         }
 
         // Base Height: Header (25) + Text + PaddingTop(15) + PaddingContent(10) + PaddingBottom(15)
@@ -362,19 +362,22 @@ const generatePDF = async (project, mediaObject, comments, res, settings = {}) =
 
         // Calculate Attachment Height Pre-emptively
         let attachmentHeight = 0;
-        if (comment.attachmentPath) {
-             const attachmentFullPath = path.join(DATA_PATH, 'media', comment.attachmentPath);
-             if (fs.existsSync(attachmentFullPath)) {
-                 try {
-                     // We need dimensions to scale.
-                     // PDFKit openImage is synchronous and cheap if cached?
-                     const attachImg = doc.openImage(attachmentFullPath);
-                     const attachScale = Math.min(maxW / attachImg.width, maxH / attachImg.height);
-                     attachmentHeight = (attachImg.height * attachScale) + 10;
-                 } catch(e) {
-                     attachmentHeight = 20; // Error text height
-                 }
-             }
+        if (comment.attachmentPaths) {
+            try {
+                const attachmentArr = JSON.parse(comment.attachmentPaths);
+                for (const attachPath of attachmentArr) {
+                    const attachmentFullPath = path.join(DATA_PATH, 'media', attachPath);
+                    if (fs.existsSync(attachmentFullPath)) {
+                        try {
+                            const attachImg = doc.openImage(attachmentFullPath);
+                            const attachScale = Math.min(maxW / attachImg.width, maxH / attachImg.height);
+                            attachmentHeight += (attachImg.height * attachScale) + 10;
+                        } catch (e) {
+                            attachmentHeight += 20;
+                        }
+                    }
+                }
+            } catch (e) { }
         }
         requiredHeight += attachmentHeight;
 
@@ -388,25 +391,25 @@ const generatePDF = async (project, mediaObject, comments, res, settings = {}) =
 
         // Draw Card Background
         doc.roundedRect(cardX, startY, cardW, requiredHeight, 5)
-           .fillColor(THEME.cardBg)
-           .fill();
+            .fillColor(THEME.cardBg)
+            .fill();
 
         // Border
         doc.roundedRect(cardX, startY, cardW, requiredHeight, 5)
-           .strokeColor(THEME.border)
-           .stroke();
+            .strokeColor(THEME.border)
+            .stroke();
 
         let contentY = startY + padding;
 
         // Header
         let currentHeaderX = cardX + padding;
         if (isVideo) {
-             const timeStr = formatTime(comment.timestamp, mediaObject.frameRate) +
-                             (isRange ? ` - ${formatTime(comment.timestamp + comment.duration, mediaObject.frameRate)}` : "");
+            const timeStr = formatTime(comment.timestamp, mediaObject.frameRate) +
+                (isRange ? ` - ${formatTime(comment.timestamp + comment.duration, mediaObject.frameRate)}` : "");
 
-             doc.fontSize(12).fillColor(THEME.accent).text(timeStr, currentHeaderX, contentY, { continued: false });
-             const timeWidth = doc.widthOfString(timeStr);
-             currentHeaderX += timeWidth;
+            doc.fontSize(12).fillColor(THEME.accent).text(timeStr, currentHeaderX, contentY, { continued: false });
+            const timeWidth = doc.widthOfString(timeStr);
+            currentHeaderX += timeWidth;
         }
 
         const nameStr = `  •  ${comment.guestName || comment.user?.name || 'Unknown'}`;
@@ -445,7 +448,7 @@ const generatePDF = async (project, mediaObject, comments, res, settings = {}) =
                         // Label
                         doc.fontSize(8).fillColor(THEME.muted).text(formatTime(times[i], mediaObject.frameRate), currentX, contentY + shotHeight + 5, { width: shotWidth, align: 'center' });
                     } catch (e) {
-                         doc.text("Img Error", currentX, contentY);
+                        doc.text("Img Error", currentX, contentY);
                     }
                 }
                 currentX += shotWidth + 5;
@@ -453,8 +456,8 @@ const generatePDF = async (project, mediaObject, comments, res, settings = {}) =
 
             if (comment.annotation) {
                 try {
-                     drawAnnotation(doc, comment.annotation, cardX + padding, contentY, shotWidth, shotHeight);
-                } catch (e) {}
+                    drawAnnotation(doc, comment.annotation, cardX + padding, contentY, shotWidth, shotHeight);
+                } catch (e) { }
             }
 
             // Increment Y past the range images
@@ -462,70 +465,69 @@ const generatePDF = async (project, mediaObject, comments, res, settings = {}) =
 
         } else if (hasImage) {
             // Single Image - Use Prepared Image
-             if (preparedImage) {
-                 try {
-                     // Center Horizontally
-                     const renderX = cardX + padding + (maxW - preparedImage.width) / 2;
-                     const renderY = contentY;
-
-                     // Use width/height to force exact size we calculated
-                     doc.image(preparedImage.obj, renderX, renderY, { width: preparedImage.width, height: preparedImage.height });
-
-                     if (comment.annotation) {
-                         drawAnnotation(doc, comment.annotation, renderX, renderY, preparedImage.width, preparedImage.height);
-                     }
-                     contentY += preparedImage.height + 10;
-                 } catch (e) {
-                     console.error("Image render error", e);
-                     doc.text("[Image Error]", cardX + padding, contentY);
-                     contentY += 30;
-                 }
-             } else {
-                 // Error or missing
-                 if (isThreeD && !comment.screenshotPath) {
-                      doc.fontSize(10).fillColor(THEME.muted).text("[No 3D Preview Available]", cardX + padding, contentY);
-                      contentY += 20;
-                 } else if (imageAreaHeight > 10) {
-                     doc.text("[Image Error]", cardX + padding, contentY);
-                     contentY += 30;
-                 }
-             }
-        }
-
-        // Attachment Image (Stacked Below)
-        if (comment.attachmentPath) {
-            const attachmentFullPath = path.join(DATA_PATH, 'media', comment.attachmentPath);
-            if (fs.existsSync(attachmentFullPath)) {
+            if (preparedImage) {
                 try {
-                    const attachImg = doc.openImage(attachmentFullPath);
-                    const attachScale = Math.min(maxW / attachImg.width, maxH / attachImg.height);
-                    const attachW = attachImg.width * attachScale;
-                    const attachH = attachImg.height * attachScale;
+                    // Center Horizontally
+                    const renderX = cardX + padding + (maxW - preparedImage.width) / 2;
+                    const renderY = contentY;
 
-                    // Center
-                    const attachX = cardX + padding + (maxW - attachW) / 2;
+                    // Use width/height to force exact size we calculated
+                    doc.image(preparedImage.obj, renderX, renderY, { width: preparedImage.width, height: preparedImage.height });
 
-                    // Check page break
-                    if (doc.y + attachH + 20 > doc.page.height - 50) {
-                        doc.addPage();
-                        fillBackground();
-                        contentY = 50;
-                    } else if (contentY + attachH + 20 > doc.y + requiredHeight) {
-                        // Dynamic height adjustment if attachment pushed us further
-                        // But we already pre-calculated requiredHeight? No, we didn't include attachment in pre-calc!
-                        // We must pre-calculate properly or rely on dynamic flow.
-                        // PDFKit 'rect' was already drawn.
-                        // We need to fix the pre-calculation block first.
+                    if (comment.annotation) {
+                        drawAnnotation(doc, comment.annotation, renderX, renderY, preparedImage.width, preparedImage.height);
                     }
-
-                    doc.image(attachImg, attachX, contentY, { width: attachW });
-                    contentY += attachH + 10;
-                } catch(e) {
-                    console.error("Attachment render error", e);
-                    doc.text("[Attachment Error]", cardX + padding, contentY);
+                    contentY += preparedImage.height + 10;
+                } catch (e) {
+                    console.error("Image render error", e);
+                    doc.text("[Image Error]", cardX + padding, contentY);
+                    contentY += 30;
+                }
+            } else {
+                // Error or missing
+                if (isThreeD && !comment.screenshotPath) {
+                    doc.fontSize(10).fillColor(THEME.muted).text("[No 3D Preview Available]", cardX + padding, contentY);
                     contentY += 20;
+                } else if (imageAreaHeight > 10) {
+                    doc.text("[Image Error]", cardX + padding, contentY);
+                    contentY += 30;
                 }
             }
+        }
+
+        // Attachment Images (Stacked Below)
+        if (comment.attachmentPaths) {
+            try {
+                const attachmentArr = JSON.parse(comment.attachmentPaths);
+                for (const attachPath of attachmentArr) {
+                    const attachmentFullPath = path.join(DATA_PATH, 'media', attachPath);
+                    if (fs.existsSync(attachmentFullPath)) {
+                        try {
+                            const attachImg = doc.openImage(attachmentFullPath);
+                            const attachScale = Math.min(maxW / attachImg.width, maxH / attachImg.height);
+                            const attachW = attachImg.width * attachScale;
+                            const attachH = attachImg.height * attachScale;
+
+                            // Center
+                            const attachX = cardX + padding + (maxW - attachW) / 2;
+
+                            // Check page break
+                            if (doc.y + attachH + 20 > doc.page.height - 50) {
+                                doc.addPage();
+                                fillBackground();
+                                contentY = 50;
+                            }
+
+                            doc.image(attachImg, attachX, contentY, { width: attachW });
+                            contentY += attachH + 10;
+                        } catch (e) {
+                            console.error("Attachment render error", e);
+                            doc.text("[Attachment Error]", cardX + padding, contentY);
+                            contentY += 20;
+                        }
+                    }
+                }
+            } catch (e) { }
         }
 
         doc.y = Math.max(doc.y, startY + requiredHeight + 10); // Ensure we move down past the card
@@ -537,62 +539,62 @@ const generatePDF = async (project, mediaObject, comments, res, settings = {}) =
     const isThreeD = mediaObject.mimeType === 'model/gltf-binary' || (mediaObject.filename && mediaObject.filename.endsWith('.glb'));
 
     if (isImageBundle) {
-         const images = mediaObject.images;
+        const images = mediaObject.images;
 
-         if (images.length === 0) {
-             doc.fontSize(12).text("No images in this version.", 50, doc.y);
-         }
+        if (images.length === 0) {
+            doc.fontSize(12).text("No images in this version.", 50, doc.y);
+        }
 
-         for (const img of images) {
-             doc.addPage();
-             fillBackground();
+        for (const img of images) {
+            doc.addPage();
+            fillBackground();
 
-             doc.fontSize(16).fillColor(THEME.text).text(`Image ${img.order + 1}: ${img.originalName}`, 50, 50);
-             doc.moveDown();
+            doc.fontSize(16).fillColor(THEME.text).text(`Image ${img.order + 1}: ${img.originalName}`, 50, 50);
+            doc.moveDown();
 
-             let imgPath = img.path;
-             if (!path.isAbsolute(imgPath)) {
-                 imgPath = path.join(DATA_PATH, '..', img.path);
-             }
+            let imgPath = img.path;
+            if (!path.isAbsolute(imgPath)) {
+                imgPath = path.join(DATA_PATH, '..', img.path);
+            }
 
-             // Draw Main Image
-             if (fs.existsSync(imgPath)) {
-                 try {
-                     const imgObj = doc.openImage(imgPath);
-                     const maxW = 500;
-                     const maxH = 300;
-                     const scale = Math.min(maxW / imgObj.width, maxH / imgObj.height);
-                     const w = imgObj.width * scale;
-                     const h = imgObj.height * scale;
+            // Draw Main Image
+            if (fs.existsSync(imgPath)) {
+                try {
+                    const imgObj = doc.openImage(imgPath);
+                    const maxW = 500;
+                    const maxH = 300;
+                    const scale = Math.min(maxW / imgObj.width, maxH / imgObj.height);
+                    const w = imgObj.width * scale;
+                    const h = imgObj.height * scale;
 
-                     doc.image(imgObj, 50, doc.y, { width: w });
-                     doc.y += h + 20;
-                 } catch (e) {
-                     doc.text("[Image Missing]");
-                 }
-             }
+                    doc.image(imgObj, 50, doc.y, { width: w });
+                    doc.y += h + 20;
+                } catch (e) {
+                    doc.text("[Image Missing]");
+                }
+            }
 
-             doc.fontSize(14).text("Comments");
-             doc.moveDown(0.5);
+            doc.fontSize(14).text("Comments");
+            doc.moveDown(0.5);
 
-             if (!img.comments || img.comments.length === 0) {
-                 doc.fontSize(10).fillColor(THEME.muted).text("No comments on this image.");
-             } else {
-                 for (const comment of img.comments) {
-                     await drawCommentCard(comment, imgPath, false, false);
-                 }
-             }
-         }
+            if (!img.comments || img.comments.length === 0) {
+                doc.fontSize(10).fillColor(THEME.muted).text("No comments on this image.");
+            } else {
+                for (const comment of img.comments) {
+                    await drawCommentCard(comment, imgPath, false, false);
+                }
+            }
+        }
     } else {
-         doc.addPage();
-         fillBackground();
-         doc.y = 50;
-         doc.fontSize(16).fillColor(THEME.text).text("Comments Log");
-         doc.moveDown(1);
+        doc.addPage();
+        fillBackground();
+        doc.y = 50;
+        doc.fontSize(16).fillColor(THEME.text).text("Comments Log");
+        doc.moveDown(1);
 
-         if (comments.length === 0) {
+        if (comments.length === 0) {
             doc.text("No comments on this version.");
-         } else {
+        } else {
             for (const comment of comments) {
                 // Determine if it is actually video. If isThreeD is true, isVideo is false.
                 // But fallback logic uses isVideo to attempt screenshot.
@@ -632,13 +634,13 @@ const generateCSV = async (project, video, comments, res, dateFormat = "DD/MM/YY
     const writer = createObjectCsvWriter({
         path: tempPath,
         header: [
-             { id: 'timecode', title: 'Timecode' },
-             { id: 'user', title: 'User' },
-             { id: 'content', title: 'Comment' },
-             { id: 'status', title: 'Status' },
-             { id: 'assignee', title: 'Assignee' },
-             { id: 'duration', title: 'Duration (s)' },
-             { id: 'date', title: 'Date' }
+            { id: 'timecode', title: 'Timecode' },
+            { id: 'user', title: 'User' },
+            { id: 'content', title: 'Comment' },
+            { id: 'status', title: 'Status' },
+            { id: 'assignee', title: 'Assignee' },
+            { id: 'duration', title: 'Duration (s)' },
+            { id: 'date', title: 'Date' }
         ]
     });
 

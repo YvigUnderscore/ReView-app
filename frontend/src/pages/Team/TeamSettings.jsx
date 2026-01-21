@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { toast } from 'sonner';
-import { ChevronLeft, Save } from 'lucide-react';
+import { ChevronLeft, Save, LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 const TeamSettings = () => {
@@ -389,6 +389,48 @@ const TeamSettings = () => {
                             {actionLoading ? 'Processing...' : 'Force Send Now'}
                         </button>
                     </div>
+
+                    {/* Leave Team Section - Only for non-owners */}
+                    {teamDetails && !teamDetails.isOwner && (
+                        <div className="flex items-center justify-between mt-6 pt-6 border-t border-border">
+                            <div>
+                                <p className="font-medium text-red-500">Leave Team</p>
+                                <p className="text-sm text-muted-foreground">
+                                    Remove yourself from this team. This action cannot be undone.
+                                </p>
+                            </div>
+                            <button
+                                onClick={async () => {
+                                    if (!confirm(`Are you sure you want to leave "${teamDetails.name}"? You will lose access to all team projects.`)) return;
+                                    try {
+                                        setActionLoading(true);
+                                        const res = await fetch(`/api/teams/${activeTeam.id}/leave`, {
+                                            method: 'POST',
+                                            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                                        });
+                                        if (res.ok) {
+                                            toast.success('You have left the team');
+                                            await checkStatus(); // Refresh user data
+                                            navigate('/');
+                                        } else {
+                                            const data = await res.json();
+                                            toast.error(data.error || 'Failed to leave team');
+                                        }
+                                    } catch (e) {
+                                        console.error(e);
+                                        toast.error('Failed to leave team');
+                                    } finally {
+                                        setActionLoading(false);
+                                    }
+                                }}
+                                disabled={actionLoading}
+                                className="bg-red-500/10 text-red-500 border border-red-500/20 px-4 py-2 rounded-md hover:bg-red-500/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                            >
+                                <LogOut size={16} />
+                                {actionLoading ? 'Leaving...' : 'Leave Team'}
+                            </button>
+                        </div>
+                    )}
                 </div>
 
                 <div className="flex justify-end pt-4">

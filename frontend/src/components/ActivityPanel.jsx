@@ -225,21 +225,34 @@ const CommentItem = ({ comment, onCommentClick, onToggleResolved, onToggleVisibi
                             🎨
                         </div>
                     )}
-                    {comment.attachmentPath && (
-                        <div
-                            className="mt-2 relative rounded overflow-hidden cursor-zoom-in"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                setShowImageModal(true);
-                            }}
-                        >
-                            <img
-                                src={`/api/media/${comment.attachmentPath}`}
-                                alt="Attachment"
-                                className="max-h-48 w-auto rounded border border-border"
-                            />
-                        </div>
-                    )}
+                    {comment.attachmentPaths && (() => {
+                        try {
+                            const paths = JSON.parse(comment.attachmentPaths);
+                            if (paths && paths.length > 0) {
+                                return (
+                                    <div className={`mt-2 ${paths.length > 1 ? 'grid grid-cols-2 gap-1' : ''}`}>
+                                        {paths.map((path, idx) => (
+                                            <div
+                                                key={idx}
+                                                className="relative rounded overflow-hidden cursor-zoom-in"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setShowImageModal(path);
+                                                }}
+                                            >
+                                                <img
+                                                    src={`/api/media/${path}`}
+                                                    alt={`Attachment ${idx + 1}`}
+                                                    className="max-h-48 w-auto rounded border border-border object-cover"
+                                                />
+                                            </div>
+                                        ))}
+                                    </div>
+                                );
+                            }
+                        } catch (e) { }
+                        return null;
+                    })()}
 
                     {showImageModal && (
                         <div
@@ -250,7 +263,7 @@ const CommentItem = ({ comment, onCommentClick, onToggleResolved, onToggleVisibi
                             }}
                         >
                             <img
-                                src={`/api/media/${comment.attachmentPath}`}
+                                src={`/api/media/${showImageModal}`}
                                 alt="Full Attachment"
                                 className="max-w-full max-h-full rounded shadow-lg"
                             />
@@ -384,7 +397,7 @@ const ActivityPanel = ({
     const [userRole, setUserRole] = useState(null);
     const [showExportMenu, setShowExportMenu] = useState(false);
     const [pastedImage, setPastedImage] = useState(null);
-    const [attachment, setAttachment] = useState(null);
+    const [attachments, setAttachments] = useState([]); // Array of { file, preview }
     const [isMuted, setIsMuted] = useState(false);
     const fileInputRef = useRef(null);
     const mentionsInputRef = useRef(null);
@@ -563,7 +576,7 @@ const ActivityPanel = ({
 
         // Use overrides if provided, otherwise fall back to state
         const contentToSubmit = overrides.content !== undefined ? overrides.content : newComment;
-        const attachmentToSubmit = overrides.attachment !== undefined ? overrides.attachment : attachment;
+        const attachmentToSubmit = overrides.attachment !== undefined ? overrides.attachment : attachments;
 
         if (getAnnotations) {
             const currentAnnotations = getAnnotations();
@@ -614,7 +627,8 @@ const ActivityPanel = ({
 
         // Check if we have valid content to submit
         const hasAnnotationContent = Array.isArray(annotations) ? annotations.length > 0 : !!annotations?.is3DAnchoredAnnotation;
-        if (!contentToSubmit.trim() && !hasAnnotationContent && !pastedImage && !attachmentToSubmit) return;
+        const hasAttachments = Array.isArray(attachmentToSubmit) ? attachmentToSubmit.length > 0 : !!attachmentToSubmit;
+        if (!contentToSubmit.trim() && !hasAnnotationContent && !pastedImage && !hasAttachments) return;
         setSubmitting(true);
 
         try {
@@ -637,8 +651,13 @@ const ActivityPanel = ({
             if (imageId) formData.append('imageId', imageId);
             if (threeDAssetId) formData.append('threeDAssetId', threeDAssetId);
 
-            // Attachment Logic: Pasted Image OR Uploaded File
-            if (attachmentToSubmit) {
+            // Attachment Logic: Array of files uses 'attachments', single file uses 'attachment'
+            if (attachmentToSubmit && Array.isArray(attachmentToSubmit) && attachmentToSubmit.length > 0) {
+                attachmentToSubmit.forEach(att => {
+                    formData.append('attachments', att.file || att);
+                });
+            } else if (attachmentToSubmit && !Array.isArray(attachmentToSubmit)) {
+                // Single file (legacy/override)
                 formData.append('attachment', attachmentToSubmit);
             } else if (pastedImage) {
                 // Convert DataURL to Blob and append as file
@@ -669,7 +688,7 @@ const ActivityPanel = ({
                 setAssigneeId('');
                 setReplyingTo(null);
                 setPastedImage(null);
-                setAttachment(null);
+                setAttachments([]);
                 if (fileInputRef.current) fileInputRef.current.value = '';
                 if (onClearAnnotations) onClearAnnotations();
             }
@@ -1034,13 +1053,39 @@ const ActivityPanel = ({
                             <button
                                 onClick={() => {
                                     setPastedImage(null);
-                                    setAttachment(null);
+                                    setAttachments([]);
                                     if (fileInputRef.current) fileInputRef.current.value = '';
                                 }}
                                 className="absolute top-0 right-0 bg-black/50 text-white p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
                             >
                                 <X size={12} />
                             </button>
+                        </div>
+                    )}
+                    {/* Multiple attachments preview */}
+                    {attachments.length > 0 && (
+                        <div className="mb-2 flex flex-wrap gap-1">
+                            {attachments.map((att, idx) => (
+                                <div key={idx} className="relative w-16 h-16 border border-border rounded overflow-hidden group">
+                                    <img src={att.preview} alt={`Attachment ${idx + 1}`} className="w-full h-full object-cover" />
+                                    <button
+                                        onClick={() => {
+                                            setAttachments(prev => prev.filter((_, i) => i !== idx));
+                                        }}
+                                        className="absolute top-0 right-0 bg-black/50 text-white p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                                    >
+                                        <X size={10} />
+                                    </button>
+                                </div>
+                            ))}
+                            {attachments.length < 10 && (
+                                <button
+                                    onClick={() => fileInputRef.current?.click()}
+                                    className="w-16 h-16 border border-dashed border-border rounded flex items-center justify-center text-muted-foreground hover:border-primary hover:text-primary transition-colors"
+                                >
+                                    <ImageIcon size={16} />
+                                </button>
+                            )}
                         </div>
                     )}
                     <div className="flex flex-col gap-2">
@@ -1068,24 +1113,37 @@ const ActivityPanel = ({
                                     type="file"
                                     ref={fileInputRef}
                                     accept="image/png, image/jpeg, image/webp"
+                                    multiple
                                     style={{ display: 'none' }}
                                     onClick={(e) => e.target.value = null}
                                     onChange={(e) => {
-                                        const file = e.target.files[0];
-                                        if (file) {
-                                            if (file.size > 10 * 1024 * 1024) {
-                                                toast.error("File too large (Max 10MB)");
-                                                return;
-                                            }
-                                            setAttachment(file);
+                                        const files = Array.from(e.target.files || []);
+                                        if (files.length === 0) return;
 
-                                            // Create preview for uploaded file
+                                        // Check total count (existing + new <= 10)
+                                        if (attachments.length + files.length > 10) {
+                                            toast.error(`Max 10 images. You can add ${10 - attachments.length} more.`);
+                                            return;
+                                        }
+
+                                        // Validate each file
+                                        const validFiles = [];
+                                        for (const file of files) {
+                                            if (file.size > 5 * 1024 * 1024) {
+                                                toast.error(`${file.name} is too large (Max 5MB per file)`);
+                                                continue;
+                                            }
+                                            validFiles.push(file);
+                                        }
+
+                                        // Create previews for all valid files
+                                        validFiles.forEach(file => {
                                             const reader = new FileReader();
                                             reader.onload = (event) => {
-                                                setPastedImage(event.target.result);
+                                                setAttachments(prev => [...prev, { file, preview: event.target.result }]);
                                             };
                                             reader.readAsDataURL(file);
-                                        }
+                                        });
                                     }}
                                 />
                             </div>
