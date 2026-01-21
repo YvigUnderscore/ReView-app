@@ -1996,31 +1996,44 @@ router.post('/:id/versions', authenticateToken, versionRateLimiter, upload.field
 });
 
 // POST /projects/:id/comments: Add comment (Video or Image)
-router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUpload.single('attachment'), async (req, res) => {
+// Accept both 'attachment' (single, legacy) and 'attachments' (multiple, new)
+router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUpload.fields([
+    { name: 'attachment', maxCount: 1 },
+    { name: 'attachments', maxCount: 10 }
+]), async (req, res) => {
     const { content, timestamp, annotation, parentId, duration, assigneeId, videoId, imageId, threeDAssetId, cameraState, hotspots, screenshot, annotationScreenshot } = req.body;
-    const attachmentFile = req.file;
+
+    // Combine attachment files from both field names
+    const attachmentFiles = [
+        ...(req.files?.attachment || []),
+        ...(req.files?.attachments || [])
+    ];
 
     // Calculate sizes for quota
     let totalSize = 0;
-    if (attachmentFile) totalSize += attachmentFile.size;
+    attachmentFiles.forEach(f => totalSize += f.size);
     // Screenshot is base64 string, length is approx size in chars (bytes? Base64 is ~1.33x larger than binary)
     // But we store binary. We will calculate binary size.
     // We do it below in matches.
 
     // Input Validation
     if (!isValidText(content, 5000)) {
-        if (attachmentFile) try { fs.unlinkSync(attachmentFile.path); } catch (e) { }
+        attachmentFiles.forEach(f => { try { fs.unlinkSync(f.path); } catch (e) { } });
         return res.status(400).json({ error: 'Comment content exceeds 5000 characters' });
     }
 
-    // Validate attachment if present
-    let attachmentPath = null;
-    if (attachmentFile) {
+    // Validate attachments (max 10 files, 5MB each)
+    let attachmentPaths = [];
+    for (const attachmentFile of attachmentFiles) {
+        if (attachmentFile.size > 5 * 1024 * 1024) {
+            attachmentFiles.forEach(f => { try { fs.unlinkSync(f.path); } catch (e) { } });
+            return res.status(400).json({ error: 'Each attachment must be under 5MB' });
+        }
         if (!isValidImageFile(attachmentFile.path)) {
-            try { fs.unlinkSync(attachmentFile.path); } catch (e) { }
+            attachmentFiles.forEach(f => { try { fs.unlinkSync(f.path); } catch (e) { } });
             return res.status(400).json({ error: 'Invalid attachment file format' });
         }
-        attachmentPath = attachmentFile.filename;
+        attachmentPaths.push(attachmentFile.filename);
     }
 
     const projectId = parseInt(req.params.id);
@@ -2028,7 +2041,7 @@ router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUploa
     // Security: Check if user has access to the project
     const access = await checkProjectAccess(req.user, projectId);
     if (!access.authorized) {
-        if (attachmentFile) try { fs.unlinkSync(attachmentFile.path); } catch (e) { }
+        attachmentFiles.forEach(f => { try { fs.unlinkSync(f.path); } catch (e) { } });
         return res.status(access.status).json({ error: access.error });
     }
 
@@ -2067,7 +2080,7 @@ router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUploa
                     screenshotSize += result.size;
                 }
             } catch (e) {
-                if (attachmentFile) try { fs.unlinkSync(attachmentFile.path); } catch (err) { }
+                attachmentFiles.forEach(f => { try { fs.unlinkSync(f.path); } catch (err) { } });
                 return res.status(400).json({ error: e.message });
             }
         }
@@ -2094,7 +2107,7 @@ router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUploa
                     fileSize: totalSize
                 });
             } catch (e) {
-                if (attachmentFile) try { fs.unlinkSync(attachmentFile.path); } catch (err) { }
+                attachmentFiles.forEach(f => { try { fs.unlinkSync(f.path); } catch (err) { } });
                 // Clean up screenshots if quota exceeded
                 if (screenshotPath) try { fs.unlinkSync(path.join(DATA_PATH, 'comments', screenshotPath)); } catch (err) { }
                 if (annotationScreenshotPath) try { fs.unlinkSync(path.join(DATA_PATH, 'comments', annotationScreenshotPath)); } catch (err) { }
@@ -2140,7 +2153,7 @@ router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUploa
             hotspots: hotspots ? (typeof hotspots === 'string' ? hotspots : JSON.stringify(hotspots)) : null,
             screenshotPath,
             annotationScreenshotPath,
-            attachmentPath,
+            attachmentPaths: attachmentPaths.length > 0 ? JSON.stringify(attachmentPaths) : null,
             size: BigInt(totalSize)
         };
 
@@ -3307,9 +3320,14 @@ router.delete('/:id/permanent', authenticateToken, async (req, res) => {
             // If they did, we'd add to teamBytesToRelease.
 
             // Delete files
-            if (c.attachmentPath) {
-                const p = path.join(DATA_PATH, 'media', c.attachmentPath);
-                try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch (e) { }
+            if (c.attachmentPaths) {
+                try {
+                    const paths = JSON.parse(c.attachmentPaths);
+                    for (const attachPath of paths) {
+                        const p = path.join(DATA_PATH, 'media', attachPath);
+                        try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch (e) { }
+                    }
+                } catch (e) { }
             }
             if (c.screenshotPath) {
                 const p = path.join(DATA_PATH, 'comments', c.screenshotPath);

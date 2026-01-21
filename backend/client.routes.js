@@ -165,34 +165,49 @@ const commentLimiter = rateLimit({
 
 // POST /api/client/projects/:token/comments
 // Public endpoint for guest comments
-router.post('/projects/:token/comments', commentLimiter, commentUpload.single('attachment'), async (req, res) => {
+// Accept both 'attachment' (single, legacy) and 'attachments' (multiple, new)
+router.post('/projects/:token/comments', commentLimiter, commentUpload.fields([
+    { name: 'attachment', maxCount: 1 },
+    { name: 'attachments', maxCount: 10 }
+]), async (req, res) => {
     const { token } = req.params;
     const { content, timestamp, annotation, guestName, videoId, imageId, threeDAssetId, parentId, cameraState, hotspots, screenshot } = req.body;
-    const attachmentFile = req.file;
+
+    // Combine attachment files from both field names
+    const attachmentFiles = [
+        ...(req.files?.attachment || []),
+        ...(req.files?.attachments || [])
+    ];
+
+    const cleanupFiles = () => attachmentFiles.forEach(f => { try { fs.unlinkSync(f.path); } catch (e) { } });
 
     if (!guestName) {
-        if (attachmentFile) try { fs.unlinkSync(attachmentFile.path); } catch (e) { }
+        cleanupFiles();
         return res.status(400).json({ error: 'Guest name is required' });
     }
 
     // Security: Input Validation
     if (!isValidText(content, 5000)) {
-        if (attachmentFile) try { fs.unlinkSync(attachmentFile.path); } catch (e) { }
+        cleanupFiles();
         return res.status(400).json({ error: 'Comment content exceeds 5000 characters' });
     }
     if (!isValidText(guestName, 100)) {
-        if (attachmentFile) try { fs.unlinkSync(attachmentFile.path); } catch (e) { }
+        cleanupFiles();
         return res.status(400).json({ error: 'Guest name exceeds 100 characters' });
     }
 
-    // Validate attachment
-    let attachmentPath = null;
-    if (attachmentFile) {
+    // Validate attachments (max 10 files, 5MB each)
+    let attachmentPaths = [];
+    for (const attachmentFile of attachmentFiles) {
+        if (attachmentFile.size > 5 * 1024 * 1024) {
+            cleanupFiles();
+            return res.status(400).json({ error: 'Each attachment must be under 5MB' });
+        }
         if (!isValidImageFile(attachmentFile.path)) {
-            try { fs.unlinkSync(attachmentFile.path); } catch (e) { }
+            cleanupFiles();
             return res.status(400).json({ error: 'Invalid attachment file format' });
         }
-        attachmentPath = attachmentFile.filename;
+        attachmentPaths.push(attachmentFile.filename);
     }
 
     try {
@@ -201,17 +216,17 @@ router.post('/projects/:token/comments', commentLimiter, commentUpload.single('a
         });
 
         if (!project) {
-            if (attachmentFile) try { fs.unlinkSync(attachmentFile.path); } catch (e) { }
+            cleanupFiles();
             return res.status(404).json({ error: 'Project not found' });
         }
 
         if (project.status !== 'CLIENT_REVIEW' && project.status !== 'ALL_REVIEWS_DONE') {
-            if (attachmentFile) try { fs.unlinkSync(attachmentFile.path); } catch (e) { }
+            cleanupFiles();
             return res.status(403).json({ error: 'Reviews are not active for this project' });
         }
 
         if (project.status === 'ALL_REVIEWS_DONE') {
-            if (attachmentFile) try { fs.unlinkSync(attachmentFile.path); } catch (e) { }
+            cleanupFiles();
             return res.status(403).json({ error: 'Reviews are closed for this project' });
         }
 
@@ -229,7 +244,7 @@ router.post('/projects/:token/comments', commentLimiter, commentUpload.single('a
         }
 
         if (!assetFound) {
-            if (attachmentFile) try { fs.unlinkSync(attachmentFile.path); } catch (e) { }
+            cleanupFiles();
             return res.status(404).json({ error: 'Asset not found or does not belong to this project' });
         }
 
@@ -240,12 +255,12 @@ router.post('/projects/:token/comments', commentLimiter, commentUpload.single('a
                 const buffer = Buffer.from(matches[2], 'base64');
 
                 if (buffer.length > 5 * 1024 * 1024) {
-                    if (attachmentFile) try { fs.unlinkSync(attachmentFile.path); } catch (e) { }
+                    cleanupFiles();
                     return res.status(400).json({ error: 'Screenshot too large (max 5MB)' });
                 }
 
                 if (!isValidImageBuffer(buffer)) {
-                    if (attachmentFile) try { fs.unlinkSync(attachmentFile.path); } catch (e) { }
+                    cleanupFiles();
                     return res.status(400).json({ error: 'Invalid screenshot file format' });
                 }
 
@@ -267,7 +282,7 @@ router.post('/projects/:token/comments', commentLimiter, commentUpload.single('a
             cameraState: cameraState ? (typeof cameraState === 'string' ? cameraState : JSON.stringify(cameraState)) : null,
             hotspots: hotspots ? (typeof hotspots === 'string' ? hotspots : JSON.stringify(hotspots)) : null,
             screenshotPath,
-            attachmentPath
+            attachmentPaths: attachmentPaths.length > 0 ? JSON.stringify(attachmentPaths) : null
         };
 
         if (videoId) data.videoId = parseInt(videoId);
