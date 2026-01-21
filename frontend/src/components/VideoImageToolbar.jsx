@@ -190,7 +190,7 @@ const VideoImageToolbar = ({
 
             {/* === CAPSULE 1: Timeline (Left) - Video Only === */}
             {assetType === 'video' && (
-                <div className="flex-1 flex items-center gap-3 px-4 py-2 bg-white/10 backdrop-blur-xl border border-white/20 rounded-full shadow-lg transition-all hover:bg-white/15 pointer-events-auto min-w-0">
+                <div className="flex-1 flex items-center gap-3 px-4 py-2 bg-black/60 backdrop-blur-xl border border-white/20 rounded-full shadow-lg transition-all hover:bg-black/70 pointer-events-auto min-w-0">
 
                     {/* Play/Pause (Video only) */}
                     {assetType === 'video' && (
@@ -291,7 +291,7 @@ const VideoImageToolbar = ({
             }
 
             {/* === CAPSULE 2: Controls (Center) === */}
-            <div className="relative flex items-center gap-2 px-2 py-2 bg-white/10 backdrop-blur-xl border border-white/20 rounded-full shadow-lg transition-all hover:bg-white/15 min-h-[50px] pointer-events-auto">
+            <div className="relative flex items-center gap-2 px-2 py-2 bg-black/60 backdrop-blur-xl border border-white/20 rounded-full shadow-lg transition-all hover:bg-black/70 min-h-[50px] pointer-events-auto">
 
                 {/* Volume (Video only) - LEFT of Settings */}
                 {assetType === 'video' && (
@@ -389,7 +389,7 @@ const VideoImageToolbar = ({
 
             {/* === CAPSULE 3: Tools (Right) === */}
             <div className="pointer-events-auto shrink-0">
-                <div className="relative flex items-center gap-2 px-2 py-2 bg-white/10 backdrop-blur-xl border border-white/20 rounded-full shadow-lg transition-all hover:bg-white/15 min-h-[50px]">
+                <div className="relative flex items-center gap-2 px-2 py-2 bg-black/60 backdrop-blur-xl border border-white/20 rounded-full shadow-lg transition-all hover:bg-black/70 min-h-[50px]">
 
                     {/* Pointer button - clears canvas when clicked */}
                     <button

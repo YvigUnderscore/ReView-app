@@ -4,6 +4,14 @@ import { isPointInShape, moveShape } from '../utils/annotationUtils';
 import { timeToFrame, frameToTime } from '../utils/timeUtils';
 import DrawingToolbar from './DrawingToolbar';
 
+// Helper to format time as MM:SS
+const formatTime = (seconds) => {
+    if (!seconds || isNaN(seconds)) return '00:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+};
+
 const VideoPlayer = forwardRef(({ src, compareSrc, compareAudioEnabled, onTimeUpdate, onDurationChange, onAnnotationSave, viewingAnnotation, viewingCommentId, isDrawingModeTrigger, onUserPlay, isGuest, guestName, isReadOnly, onPlayStateChange, loop, playbackRate, frameRate = 24, onReviewSubmit, onDrawingModeChange }, ref) => {
     const videoRef = useRef(null);
     const compareVideoRef = useRef(null);
@@ -16,6 +24,10 @@ const VideoPlayer = forwardRef(({ src, compareSrc, compareAudioEnabled, onTimeUp
     const [videoError, setVideoError] = useState(null);
     const [showFullscreenMessage, setShowFullscreenMessage] = useState(false);
     const [videoDimensions, setVideoDimensions] = useState(null);
+    const [isFullscreen, setIsFullscreen] = useState(false);
+    const [showFullscreenControls, setShowFullscreenControls] = useState(true);
+    const [volume, setVolume] = useState(1);
+    const fullscreenControlsTimeoutRef = useRef(null);
 
     // Drawing State
     const [isDrawingMode, setIsDrawingMode] = useState(false);
@@ -235,16 +247,40 @@ const VideoPlayer = forwardRef(({ src, compareSrc, compareAudioEnabled, onTimeUp
 
     useEffect(() => {
         const handleFullscreenChange = () => {
-            if (document.fullscreenElement) {
+            const isFs = !!document.fullscreenElement;
+            setIsFullscreen(isFs);
+            if (isFs) {
                 setShowFullscreenMessage(true);
+                setShowFullscreenControls(true);
                 setTimeout(() => setShowFullscreenMessage(false), 2000);
             } else {
                 setShowFullscreenMessage(false);
+                setShowFullscreenControls(true);
             }
         };
         document.addEventListener('fullscreenchange', handleFullscreenChange);
         return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
     }, []);
+
+    // Fullscreen mouse move handler for auto-hide controls
+    const handleFullscreenMouseMove = useCallback(() => {
+        if (!isFullscreen) return;
+        setShowFullscreenControls(true);
+        if (fullscreenControlsTimeoutRef.current) {
+            clearTimeout(fullscreenControlsTimeoutRef.current);
+        }
+        fullscreenControlsTimeoutRef.current = setTimeout(() => {
+            if (isPlaying) {
+                setShowFullscreenControls(false);
+            }
+        }, 3000);
+    }, [isFullscreen, isPlaying]);
+
+    // Handle volume change
+    const handleVolumeChange = (newVolume) => {
+        setVolume(newVolume);
+        if (videoRef.current) videoRef.current.volume = newVolume;
+    };
 
     const normalize = (x, y) => {
         const canvas = canvasRef.current;
@@ -680,7 +716,11 @@ const VideoPlayer = forwardRef(({ src, compareSrc, compareAudioEnabled, onTimeUp
 
     return (
         <div className="flex-1 flex flex-col relative overflow-hidden group bg-black w-full h-full">
-            <div ref={containerRef} className="relative flex-1 flex justify-center items-center w-full min-h-0">
+            <div
+                ref={containerRef}
+                className="relative flex-1 flex justify-center items-center w-full min-h-0"
+                onMouseMove={isFullscreen ? handleFullscreenMouseMove : undefined}
+            >
                 {compareSrc ? (
                     <div className="grid grid-cols-2 w-full h-full gap-1">
                         <div className="relative w-full h-full flex items-center justify-center bg-black">
@@ -787,6 +827,86 @@ const VideoPlayer = forwardRef(({ src, compareSrc, compareAudioEnabled, onTimeUp
                 {showFullscreenMessage && (
                     <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/60 text-white px-4 py-2 rounded pointer-events-none transition-opacity duration-500 z-30">
                         Press Esc to exit full screen
+                    </div>
+                )}
+
+                {/* Fullscreen Overlay Controls */}
+                {isFullscreen && (
+                    <div
+                        className={`absolute inset-x-0 bottom-0 z-40 transition-opacity duration-300 ${showFullscreenControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+                        style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.8))' }}
+                    >
+                        <div className="p-6 pt-16">
+                            {/* Timeline */}
+                            <div
+                                className="w-full h-2 bg-white/30 rounded-full mb-4 cursor-pointer relative group/timeline"
+                                onClick={(e) => {
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    const x = e.clientX - rect.left;
+                                    const percent = x / rect.width;
+                                    const newTime = percent * duration;
+                                    if (videoRef.current) videoRef.current.currentTime = newTime;
+                                }}
+                            >
+                                <div
+                                    className="h-full bg-white rounded-full transition-all"
+                                    style={{ width: `${duration ? (currentTime / duration) * 100 : 0}%` }}
+                                />
+                                <div
+                                    className="absolute w-4 h-4 bg-white rounded-full -translate-x-1/2 -translate-y-1/2 top-1/2 shadow-lg opacity-0 group-hover/timeline:opacity-100 transition-opacity"
+                                    style={{ left: `${duration ? (currentTime / duration) * 100 : 0}%` }}
+                                />
+                            </div>
+
+                            {/* Controls Row */}
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-4">
+                                    {/* Play/Pause */}
+                                    <button
+                                        onClick={togglePlay}
+                                        className="w-12 h-12 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+                                    >
+                                        {isPlaying ? (
+                                            <Pause size={24} fill="currentColor" />
+                                        ) : (
+                                            <Play size={24} fill="currentColor" />
+                                        )}
+                                    </button>
+
+                                    {/* Volume */}
+                                    <div className="flex items-center gap-2 group/vol">
+                                        <button
+                                            onClick={() => handleVolumeChange(volume === 0 ? 1 : 0)}
+                                            className="p-2 rounded-full hover:bg-white/10 text-white transition-colors"
+                                        >
+                                            <Volume2 size={20} />
+                                        </button>
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="1"
+                                            step="0.05"
+                                            value={volume}
+                                            onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
+                                            className="w-20 h-1 bg-white/30 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full"
+                                        />
+                                    </div>
+
+                                    {/* Time Display */}
+                                    <span className="text-white text-sm font-mono">
+                                        {formatTime(currentTime)} / {formatTime(duration)}
+                                    </span>
+                                </div>
+
+                                {/* Exit Fullscreen */}
+                                <button
+                                    onClick={() => document.exitFullscreen()}
+                                    className="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+                                >
+                                    <Maximize size={20} />
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 )}
 

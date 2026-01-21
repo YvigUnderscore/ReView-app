@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Eye, EyeOff } from 'lucide-react';
 
@@ -126,6 +126,11 @@ const Login = () => {
               >
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
+            </div>
+            <div className="text-right mt-1">
+              <Link to="/forgot-password" className="text-xs text-muted-foreground hover:text-primary transition-colors">
+                Forgot password?
+              </Link>
             </div>
           </div>
 

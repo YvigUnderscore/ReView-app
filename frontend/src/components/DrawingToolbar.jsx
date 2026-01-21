@@ -39,7 +39,7 @@ const DrawingToolbar = ({
             transition={{ duration: 0.3, ease: "circOut" }}
             className="flex items-center overflow-hidden"
         >
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-white/10 backdrop-blur-xl border border-white/20 rounded-full shadow-lg ml-2 h-[42px]">
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-black/60 backdrop-blur-xl border border-white/20 rounded-full shadow-lg ml-2 h-[42px]">
 
                 {/* 3D Tools (if any) */}
                 {extraTools.length > 0 && (

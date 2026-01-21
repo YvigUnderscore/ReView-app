@@ -542,6 +542,48 @@ router.post('/:id/transfer', authenticateToken, async (req, res) => {
     }
 });
 
+// POST /teams/:id/leave: Leave team (Member, Admin, Client - not Owner)
+router.post('/:id/leave', authenticateToken, async (req, res) => {
+    const teamId = parseInt(req.params.id);
+
+    try {
+        const team = await prisma.team.findUnique({ where: { id: teamId } });
+        if (!team) return res.status(404).json({ error: 'Team not found' });
+
+        // Owner cannot leave - must transfer ownership first
+        if (team.ownerId === req.user.id) {
+            return res.status(400).json({ error: 'Team owner cannot leave. Transfer ownership first.' });
+        }
+
+        // Check if user is a member
+        const membership = await prisma.teamMembership.findUnique({
+            where: { userId_teamId: { userId: req.user.id, teamId } }
+        });
+
+        if (!membership) {
+            return res.status(400).json({ error: 'You are not a member of this team' });
+        }
+
+        // Delete membership
+        await prisma.teamMembership.delete({
+            where: { userId_teamId: { userId: req.user.id, teamId } }
+        });
+
+        // Notify team owner
+        await createAndBroadcast([team.ownerId], {
+            type: 'SYSTEM',
+            content: `${req.user.name || 'A member'} has left team "${team.name}"`,
+            referenceId: team.id
+        });
+
+        res.json({ message: 'You have left the team' });
+
+    } catch (error) {
+        console.error("Leave team error:", error);
+        res.status(500).json({ error: 'Failed to leave team' });
+    }
+});
+
 // POST /teams/:id/force-digest: Force send digest (Owner or Admin)
 router.post('/:id/force-digest', authenticateToken, async (req, res) => {
     const teamId = parseInt(req.params.id);
