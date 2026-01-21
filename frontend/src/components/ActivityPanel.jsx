@@ -50,7 +50,7 @@ const CommentItem = ({ comment, onCommentClick, onToggleResolved, onToggleVisibi
     return (
         <div
             ref={itemRef}
-            className={`flex gap-3 group p-2 rounded-lg transition-colors ${comment.isResolved ? 'opacity-50' : ''} ${highlightedCommentId === comment.id ? 'bg-primary/10 border border-primary/20' : ''}`}
+            className={`flex gap-3 group p-2 rounded-lg transition-colors ${comment.isResolved ? 'opacity-50' : ''} ${highlightedCommentId === comment.id ? 'bg-primary/20 border-l-4 border-l-primary shadow-sm' : ''}`}
         >
             <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary shrink-0 uppercase overflow-hidden">
                 {comment.user?.avatarPath ? (
@@ -859,7 +859,16 @@ const ActivityPanel = ({
                 </div>
             </div>
 
-            <div className="flex-1 overflow-auto p-4 space-y-4 custom-scrollbar min-h-0">
+            <div
+                className="flex-1 overflow-auto p-4 space-y-4 custom-scrollbar min-h-0"
+                onClick={(e) => {
+                    // Deselect on background click
+                    if (e.target === e.currentTarget && highlightedCommentId) {
+                        if (onCommentClick) onCommentClick(null, null, null, null);
+                        if (onClearAnnotations) onClearAnnotations();
+                    }
+                }}
+            >
                 <AnimatePresence mode="popLayout" initial={false}>
                     {filteredComments
                         .sort((a, b) => a.timestamp - b.timestamp)

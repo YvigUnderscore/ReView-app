@@ -699,25 +699,31 @@ const ClientReview = () => {
                                                         setSelectionRange(null);
                                                     }}
                                                     onCommentClick={(time, annotation, id, comment) => {
-                                                        if (assetType === 'video') {
+                                                        if (assetType === 'video' && time !== undefined && time !== null) {
                                                             videoPlayerRef.current?.seek(time);
                                                         }
                                                         setViewingAnnotation(annotation);
                                                         setHighlightedCommentId(id);
-                                                        const findComment = (comments) => {
-                                                            for (let c of comments) {
-                                                                if (c.id === id) return c;
-                                                                if (c.replies) {
-                                                                    const found = findComment(c.replies);
-                                                                    if (found) return found;
+                                                        if (id) {
+                                                            const findComment = (comments) => {
+                                                                for (let c of comments) {
+                                                                    if (c.id === id) return c;
+                                                                    if (c.replies) {
+                                                                        const found = findComment(c.replies);
+                                                                        if (found) return found;
+                                                                    }
                                                                 }
+                                                                return null;
+                                                            };
+                                                            // activeComments is memoized in ClientReview
+                                                            const target = findComment(activeComments);
+                                                            if (target && target.duration) {
+                                                                setSelectionRange({ start: target.timestamp, end: target.timestamp + target.duration });
+                                                                setRangeDuration(target.duration);
+                                                            } else {
+                                                                setSelectionRange(null);
+                                                                setRangeDuration(null);
                                                             }
-                                                            return null;
-                                                        };
-                                                        const target = findComment(activeComments);
-                                                        if (target && target.duration) {
-                                                            setSelectionRange({ start: target.timestamp, end: target.timestamp + target.duration });
-                                                            setRangeDuration(target.duration);
                                                         } else {
                                                             setSelectionRange(null);
                                                             setRangeDuration(null);
