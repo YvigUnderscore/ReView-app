@@ -6,6 +6,7 @@ const fs = require('fs');
 const { PrismaClient } = require('@prisma/client');
 const { isValidText, isValidImageBuffer, isValidImageFile } = require('./utils/validation');
 const { rateLimit } = require('./utils/rateLimiter');
+const { sanitizeHtml } = require('./utils/security');
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -257,7 +258,7 @@ router.post('/projects/:token/comments', commentLimiter, commentUpload.single('a
         }
 
         const data = {
-            content,
+            content: sanitizeHtml(content),
             timestamp: parseFloat(timestamp),
             annotation: annotation ? (typeof annotation === 'string' ? annotation : JSON.stringify(annotation)) : null,
             guestName: guestName,
