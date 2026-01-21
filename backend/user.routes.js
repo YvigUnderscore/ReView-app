@@ -10,18 +10,46 @@ const prisma = new PrismaClient();
 // GET /api/users/search: Search for users by name or email
 router.get('/search', authenticateToken, async (req, res) => {
     const { q } = req.query;
-    if (!q || q.length < 2) {
+
+    // Security: Strip wildcards to prevent injection
+    const safeQ = (q || '').replace(/[%_]/g, '').trim();
+
+    if (safeQ.length < 2) {
         return res.json([]);
     }
 
     try {
+        const whereClause = {
+            OR: [
+                { name: { contains: safeQ } },
+                { email: { contains: safeQ } }
+            ]
+        };
+
+        // Security: Scope search to mutual team members (unless Admin)
+        if (req.user.role !== 'admin') {
+            const currentUser = await prisma.user.findUnique({
+                where: { id: req.user.id },
+                select: {
+                    teamMemberships: { select: { teamId: true } }
+                }
+            });
+
+            if (currentUser && currentUser.teamMemberships) {
+                const myTeamIds = currentUser.teamMemberships.map(tm => tm.teamId);
+                whereClause.teamMemberships = {
+                    some: {
+                        teamId: { in: myTeamIds }
+                    }
+                };
+            } else {
+                // If user not found or has no teams, return empty
+                return res.json([]);
+            }
+        }
+
         const users = await prisma.user.findMany({
-            where: {
-                OR: [
-                    { name: { contains: q } },
-                    { email: { contains: q } }
-                ]
-            },
+            where: whereClause,
             take: 10,
             select: {
                 id: true,
