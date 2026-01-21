@@ -4,7 +4,7 @@ import { isPointInShape, moveShape } from '../utils/annotationUtils';
 import { timeToFrame, frameToTime } from '../utils/timeUtils';
 import DrawingToolbar from './DrawingToolbar';
 
-const VideoPlayer = forwardRef(({ src, compareSrc, compareAudioEnabled, onTimeUpdate, onDurationChange, onAnnotationSave, viewingAnnotation, isDrawingModeTrigger, onUserPlay, isGuest, guestName, isReadOnly, onPlayStateChange, loop, playbackRate, frameRate = 24, onReviewSubmit, onDrawingModeChange }, ref) => {
+const VideoPlayer = forwardRef(({ src, compareSrc, compareAudioEnabled, onTimeUpdate, onDurationChange, onAnnotationSave, viewingAnnotation, viewingCommentId, isDrawingModeTrigger, onUserPlay, isGuest, guestName, isReadOnly, onPlayStateChange, loop, playbackRate, frameRate = 24, onReviewSubmit, onDrawingModeChange }, ref) => {
     const videoRef = useRef(null);
     const compareVideoRef = useRef(null);
     const containerRef = useRef(null);
@@ -27,6 +27,7 @@ const VideoPlayer = forwardRef(({ src, compareSrc, compareAudioEnabled, onTimeUp
     const [lastPos, setLastPos] = useState({ x: 0, y: 0 });
     const [currentAnnotation, setCurrentAnnotation] = useState(null);
     const [annotations, setAnnotations] = useState([]);
+    const [currentViewingCommentId, setCurrentViewingCommentId] = useState(null);
     const [draggingAnnotation, setDraggingAnnotation] = useState(null);
     const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
     const [hoveredShapeIndex, setHoveredShapeIndex] = useState(-1);
@@ -442,14 +443,20 @@ const VideoPlayer = forwardRef(({ src, compareSrc, compareAudioEnabled, onTimeUp
     }, [isDrawingModeTrigger, isReadOnly]);
 
     useEffect(() => {
-        if (viewingAnnotation) {
-            setAnnotations(viewingAnnotation);
-        } else if (!isDrawingMode && isPlaying) {
-            setAnnotations((prev) => prev.length === 0 ? prev : []);
-        } else if (!isDrawingMode && !viewingAnnotation) {
-            setAnnotations((prev) => prev.length === 0 ? prev : []);
+        // If viewingCommentId is provided, use strict ID-based comparison
+        // Otherwise, always sync based on viewingAnnotation changes
+        const shouldUpdate = viewingCommentId !== undefined
+            ? viewingCommentId !== currentViewingCommentId
+            : true;
+
+        if (shouldUpdate) {
+            if (viewingCommentId !== undefined) {
+                setCurrentViewingCommentId(viewingCommentId);
+            }
+            // ALWAYS sync annotations with viewingAnnotation prop
+            setAnnotations(viewingAnnotation || []);
         }
-    }, [viewingAnnotation, isDrawingMode, isPlaying]);
+    }, [viewingAnnotation, viewingCommentId, currentViewingCommentId]);
 
     useEffect(() => {
         if (isPlaying && !isDrawingMode && !viewingAnnotation) {
@@ -657,7 +664,10 @@ const VideoPlayer = forwardRef(({ src, compareSrc, compareAudioEnabled, onTimeUp
     };
 
     const enterDrawingMode = () => {
-        if (!isDrawingMode) setAnnotations([]);
+        // Only clear if we don't already have annotations to edit
+        if (!isDrawingMode && annotations.length === 0) {
+            setAnnotations([]);
+        }
         setIsDrawingMode(true);
         videoRef.current.pause();
         setIsPlaying(false);
