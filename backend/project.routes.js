@@ -7,6 +7,7 @@ const { PrismaClient } = require('@prisma/client');
 const { authenticateToken } = require('./middleware');
 const { generateThumbnail } = require('./utils/thumbnail');
 const { isValidVideoFile, isValidImageFile, isValidThreeDFile, isValidZipFile, isValidText, isValidImageBuffer } = require('./utils/validation');
+const { sanitizeHtml } = require('./utils/security');
 const { generatePDF, generateCSV } = require('./utils/export');
 const { getVideoMetadata } = require('./utils/metadata');
 const { checkProjectAccess, checkCommentAccess } = require('./utils/authCheck');
@@ -2128,7 +2129,7 @@ router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUploa
         };
 
         const data = {
-            content,
+            content: sanitizeHtml(content),
             timestamp: timestamp ? parseFloat(timestamp) : 0,
             duration: duration ? parseFloat(duration) : null,
             annotation: annotation ? (typeof annotation === 'string' ? annotation : JSON.stringify(annotation)) : null,

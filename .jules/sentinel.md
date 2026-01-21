@@ -17,3 +17,8 @@
 **Vulnerability:** The `DELETE /teams/:id` endpoint in `team.routes.js` was exposing internal error messages to clients by concatenating `error.message` to the response: `'Failed to delete team: ' + error.message`. This could leak sensitive internal details like database connection errors, file path structures, or system configurations.
 **Learning:** Error handling on the server should never expose raw exception messages to clients. Internal errors are logged server-side for debugging, but clients should only receive generic error messages.
 **Prevention:** Always return static, user-friendly error messages to clients. Keep detailed error information in server logs only.
+
+## 2026-03-05 - Stored XSS in Comments
+**Vulnerability:** The comment creation endpoints (`/api/client/projects/:token/comments` and `/api/projects/:id/comments`) accepted raw HTML content and stored it directly in the database. When retrieved and rendered by the frontend, this allowed for Stored Cross-Site Scripting (XSS) attacks.
+**Learning:** Never trust user input, especially text fields that might be rendered as HTML. Frontend rendering context (like React's `dangerouslySetInnerHTML`) assumes sanitized input, but the backend must enforce this sanitization to be secure by default.
+**Prevention:** Implement server-side sanitization using a library like `xss` for all user-submitted text content before storage. This ensures that even if the frontend fails to escape output, the stored data is safe.
