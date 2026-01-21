@@ -2330,29 +2330,115 @@ router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUploa
 
 // PATCH /projects/comments/:commentId: Update comment
 router.patch('/comments/:commentId', authenticateToken, async (req, res) => {
-    const { isResolved, isVisibleToClient, assigneeId } = req.body;
+    const { isResolved, isVisibleToClient, assigneeId, content, annotation } = req.body;
     const commentId = parseInt(req.params.commentId);
 
     // Security: Check if user has access to the project containing the comment
     const access = await checkCommentAccess(req.user, commentId);
     if (!access.authorized) return res.status(access.status).json({ error: access.error });
 
+    // If content or annotation is being edited, verify user owns the comment
+    if (content !== undefined || annotation !== undefined) {
+        const comment = await prisma.comment.findUnique({ where: { id: commentId } });
+        if (!comment) return res.status(404).json({ error: 'Comment not found' });
+
+        // Only the comment author, team owner, or admin can edit content/annotations
+        const project = await prisma.project.findFirst({
+            where: {
+                OR: [
+                    { videos: { some: { comments: { some: { id: commentId } } } } },
+                    { imageBundles: { some: { images: { some: { comments: { some: { id: commentId } } } } } } },
+                    { threeDAssets: { some: { comments: { some: { id: commentId } } } } }
+                ]
+            },
+            include: { team: { select: { ownerId: true } } }
+        });
+
+        const isOwner = comment.userId === req.user.id;
+        const isTeamOwner = project?.team?.ownerId === req.user.id;
+        const isAdmin = req.user.role === 'admin';
+
+        if (!isOwner && !isTeamOwner && !isAdmin) {
+            return res.status(403).json({ error: 'You can only edit your own comments' });
+        }
+
+        // Validate content length if provided
+        if (content !== undefined && !isValidText(content, 5000)) {
+            return res.status(400).json({ error: 'Comment content exceeds 5000 characters' });
+        }
+
+        // Validate annotation if provided (should be valid JSON or null)
+        if (annotation !== undefined && annotation !== null) {
+            try {
+                if (typeof annotation === 'string') {
+                    JSON.parse(annotation);
+                }
+            } catch (e) {
+                return res.status(400).json({ error: 'Invalid annotation format' });
+            }
+        }
+    }
+
     try {
         const data = {};
         if (isResolved !== undefined) data.isResolved = isResolved;
         if (isVisibleToClient !== undefined) data.isVisibleToClient = isVisibleToClient;
         if (assigneeId !== undefined) data.assigneeId = assigneeId ? parseInt(assigneeId) : null;
+        if (content !== undefined) {
+            data.content = content;
+            data.isEdited = true;
+        }
+        if (annotation !== undefined) {
+            data.annotation = annotation ? (typeof annotation === 'string' ? annotation : JSON.stringify(annotation)) : null;
+            data.isEdited = true;
+        }
 
         const comment = await prisma.comment.update({
             where: { id: commentId },
             data: data,
             include: {
-                user: { select: { id: true, name: true, avatarPath: true } },
-                assignee: { select: { id: true, name: true } }
+                user: { select: { id: true, name: true, avatarPath: true, teamRoles: true } },
+                assignee: { select: { id: true, name: true } },
+                reactions: true,
+                replies: {
+                    include: {
+                        user: { select: { id: true, name: true, avatarPath: true, teamRoles: true } },
+                        reactions: true
+                    }
+                }
             }
         });
+
+        // Broadcast update to all connected users in the project
+        const project = await prisma.project.findFirst({
+            where: {
+                OR: [
+                    { videos: { some: { comments: { some: { id: commentId } } } } },
+                    { imageBundles: { some: { images: { some: { comments: { some: { id: commentId } } } } } } },
+                    { threeDAssets: { some: { comments: { some: { id: commentId } } } } }
+                ]
+            },
+            include: { team: { include: { members: { select: { userId: true } } } } }
+        });
+
+        if (project) {
+            const io = getIo();
+            // Broadcast to project room (for guests and focused views)
+            io.to(`project_${project.id}`).emit('COMMENT_UPDATED', { ...comment, projectId: project.id });
+
+            // Also broadcast to team members
+            if (project.team) {
+                const recipients = new Set([project.team.ownerId]);
+                project.team.members.forEach(m => recipients.add(m.userId));
+                recipients.forEach(userId => {
+                    io.to(`user_${userId}`).emit('COMMENT_UPDATED', { ...comment, projectId: project.id });
+                });
+            }
+        }
+
         res.json(comment);
     } catch (error) {
+        console.error('Error updating comment:', error);
         res.status(500).json({ error: 'Failed to update comment' });
     }
 });

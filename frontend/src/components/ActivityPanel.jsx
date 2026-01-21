@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
-import { Send, Image as ImageIcon, X, Trash2, Reply, Smile, Check, Eye, EyeOff, UserPlus, Download, Bell, BellOff, Minimize2, Video, FileText, Table, Pencil, Save, Circle, CheckCircle } from 'lucide-react';
+import { Send, Image as ImageIcon, X, Trash2, Reply, Smile, Check, Eye, EyeOff, UserPlus, Download, Bell, BellOff, Minimize2, Video, FileText, Table, Pencil, Save, Circle, CheckCircle, PenLine } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import MentionsInput from './MentionsInput';
 import { formatDate } from '../lib/dateUtils';
@@ -50,7 +50,7 @@ const CommentItem = ({ comment, onCommentClick, onToggleResolved, onToggleVisibi
     return (
         <div
             ref={itemRef}
-            className={`flex gap-3 group p-2 rounded-lg transition-colors ${comment.isResolved ? 'opacity-50' : ''} ${highlightedCommentId === comment.id ? 'bg-primary/10 border border-primary/20' : ''}`}
+            className={`flex gap-3 group p-2 rounded-lg transition-colors ${comment.isResolved ? 'opacity-50' : ''} ${highlightedCommentId === comment.id ? 'bg-primary/20 border-l-4 border-l-primary shadow-sm' : ''}`}
         >
             <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary shrink-0 uppercase overflow-hidden">
                 {comment.user?.avatarPath ? (
@@ -288,6 +288,14 @@ const CommentItem = ({ comment, onCommentClick, onToggleResolved, onToggleVisibi
                                 {formatTime(comment.timestamp)}
                                 {comment.duration && ` - ${formatTime(comment.timestamp + comment.duration)}`}
                             </span>
+                            {comment.isEdited && (
+                                <span
+                                    className="text-[10px] text-muted-foreground flex items-center gap-0.5"
+                                    title="Edited comment"
+                                >
+                                    <PenLine size={10} />
+                                </span>
+                            )}
                         </div>
                         <span className="text-[10px] text-muted-foreground">
                             {formatDate(comment.createdAt, dateFormat)}
@@ -851,7 +859,16 @@ const ActivityPanel = ({
                 </div>
             </div>
 
-            <div className="flex-1 overflow-auto p-4 space-y-4 custom-scrollbar min-h-0">
+            <div
+                className="flex-1 overflow-auto p-4 space-y-4 custom-scrollbar min-h-0"
+                onClick={(e) => {
+                    // Deselect on background click
+                    if (e.target === e.currentTarget && highlightedCommentId) {
+                        if (onCommentClick) onCommentClick(null, null, null, null);
+                        if (onClearAnnotations) onClearAnnotations();
+                    }
+                }}
+            >
                 <AnimatePresence mode="popLayout" initial={false}>
                     {filteredComments
                         .sort((a, b) => a.timestamp - b.timestamp)
@@ -894,19 +911,53 @@ const ActivityPanel = ({
                                     onEdit={(c) => {
                                         setEditingCommentId(c.id);
                                         setEditContent(c.content);
+                                        // Load existing annotations using the same mechanism as viewing comments
+                                        if (c.annotation && onCommentClick) {
+                                            try {
+                                                const existingAnnotations = JSON.parse(c.annotation);
+                                                // Use onCommentClick to load annotations into viewer and enable drawing mode
+                                                onCommentClick(c.timestamp, existingAnnotations, c.id, c);
+                                                // Enable drawing mode after annotations are loaded
+                                                setTimeout(() => {
+                                                    if (onToggleDrawing) onToggleDrawing(true);
+                                                }, 100);
+                                            } catch (e) {
+                                                console.error('Failed to load annotations for editing:', e);
+                                            }
+                                        } else if (onToggleDrawing) {
+                                            // No annotations, just enable drawing mode
+                                            onToggleDrawing(true);
+                                        }
                                     }}
                                     isEditing={editingCommentId === comment.id}
                                     editContent={editContent}
                                     setEditContent={setEditContent}
                                     onCancelEdit={() => {
+                                        const originalComment = comments.find(c => c.id === editingCommentId);
                                         setEditingCommentId(null);
                                         setEditContent('');
+                                        // Restore original comment display (including annotations)
+                                        if (originalComment && onCommentClick) {
+                                            const annos = originalComment.annotation ? JSON.parse(originalComment.annotation) : null;
+                                            onCommentClick(originalComment.timestamp, annos, originalComment.id, originalComment);
+                                        }
+                                        // Exit drawing mode
+                                        if (onToggleDrawing) onToggleDrawing(false);
                                     }}
                                     onSaveEdit={async (id) => {
                                         try {
                                             const url = isGuest
                                                 ? `/api/client/projects/${clientToken}/comments/${id}`
                                                 : `/api/projects/comments/${id}`;
+
+                                            // Get current annotations from viewer
+                                            let currentAnnotations = null;
+                                            if (getAnnotations) {
+                                                const annos = getAnnotations();
+                                                if (annos && annos.length > 0) {
+                                                    currentAnnotations = JSON.stringify(annos);
+                                                }
+                                            }
 
                                             // Handle update
                                             const res = await fetch(url, {
@@ -915,7 +966,11 @@ const ActivityPanel = ({
                                                     'Content-Type': 'application/json',
                                                     ...(!isGuest && { 'Authorization': `Bearer ${localStorage.getItem('token')}` })
                                                 },
-                                                body: JSON.stringify({ content: editContent, guestName: isGuest ? guestName : undefined })
+                                                body: JSON.stringify({
+                                                    content: editContent,
+                                                    annotation: currentAnnotations,
+                                                    guestName: isGuest ? guestName : undefined
+                                                })
                                             });
 
                                             if (res.ok) {
@@ -923,6 +978,14 @@ const ActivityPanel = ({
                                                 if (onCommentUpdated) onCommentUpdated(updated);
                                                 setEditingCommentId(null);
                                                 setEditContent('');
+                                                // Clean up: exit drawing mode and clear annotations
+                                                if (onToggleDrawing) onToggleDrawing(false);
+                                                if (onClearAnnotations) onClearAnnotations();
+                                                // Show updated comment with its annotations
+                                                if (onCommentClick && updated) {
+                                                    const annos = updated.annotation ? JSON.parse(updated.annotation) : null;
+                                                    onCommentClick(updated.timestamp, annos, updated.id, updated);
+                                                }
                                                 toast.success('Comment updated');
                                             } else {
                                                 toast.error('Failed to update comment');

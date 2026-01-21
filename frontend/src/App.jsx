@@ -978,11 +978,11 @@ const ProjectView = () => {
                                                     setSelectionRange({ start: null, end: null });
                                                 }}
                                                 onCommentClick={(time, annotation, commentId, comment) => {
-                                                    if (isVideo) {
+                                                    if (isVideo && time !== undefined && time !== null) {
                                                         videoPlayerRef.current?.seek(time);
                                                         videoPlayerRef.current?.pause();
                                                     } else if (isThreeD) {
-                                                        if (videoPlayerRef.current?.seek) {
+                                                        if (videoPlayerRef.current?.seek && time !== undefined && time !== null) {
                                                             videoPlayerRef.current.seek(time);
                                                         }
                                                         if (comment?.cameraState) {
@@ -996,19 +996,23 @@ const ProjectView = () => {
                                                     setHighlightedCommentId(commentId);
 
                                                     if (isVideo) {
-                                                        const findComment = (comments) => {
-                                                            for (let c of comments) {
-                                                                if (c.id === commentId) return c;
-                                                                if (c.replies) {
-                                                                    const found = findComment(c.replies);
-                                                                    if (found) return found;
+                                                        if (commentId) {
+                                                            const findComment = (comments) => {
+                                                                for (let c of comments) {
+                                                                    if (c.id === commentId) return c;
+                                                                    if (c.replies) {
+                                                                        const found = findComment(c.replies);
+                                                                        if (found) return found;
+                                                                    }
                                                                 }
+                                                                return null;
+                                                            };
+                                                            const target = findComment(activeComments);
+                                                            if (target && target.duration) {
+                                                                setSelectionRange({ start: target.timestamp, end: target.timestamp + target.duration });
+                                                            } else {
+                                                                setSelectionRange({ start: null, end: null });
                                                             }
-                                                            return null;
-                                                        };
-                                                        const target = findComment(activeComments);
-                                                        if (target && target.duration) {
-                                                            setSelectionRange({ start: target.timestamp, end: target.timestamp + target.duration });
                                                         } else {
                                                             setSelectionRange({ start: null, end: null });
                                                         }
@@ -1158,11 +1162,11 @@ const ProjectView = () => {
                                                     setSelectionRange({ start: null, end: null });
                                                 }}
                                                 onCommentClick={(time, annotation, commentId, comment) => {
-                                                    if (isVideo) {
+                                                    if (isVideo && time !== undefined && time !== null) {
                                                         videoPlayerRef.current?.seek(time);
                                                         videoPlayerRef.current?.pause();
                                                     } else if (isThreeD) {
-                                                        if (videoPlayerRef.current?.seek) {
+                                                        if (videoPlayerRef.current?.seek && time !== undefined && time !== null) {
                                                             videoPlayerRef.current.seek(time);
                                                         }
                                                         if (comment?.cameraState) {
@@ -1176,19 +1180,23 @@ const ProjectView = () => {
                                                     setHighlightedCommentId(commentId);
 
                                                     if (isVideo) {
-                                                        const findComment = (comments) => {
-                                                            for (let c of comments) {
-                                                                if (c.id === commentId) return c;
-                                                                if (c.replies) {
-                                                                    const found = findComment(c.replies);
-                                                                    if (found) return found;
+                                                        if (commentId) {
+                                                            const findComment = (comments) => {
+                                                                for (let c of comments) {
+                                                                    if (c.id === commentId) return c;
+                                                                    if (c.replies) {
+                                                                        const found = findComment(c.replies);
+                                                                        if (found) return found;
+                                                                    }
                                                                 }
+                                                                return null;
+                                                            };
+                                                            const target = findComment(activeComments);
+                                                            if (target && target.duration) {
+                                                                setSelectionRange({ start: target.timestamp, end: target.timestamp + target.duration });
+                                                            } else {
+                                                                setSelectionRange({ start: null, end: null });
                                                             }
-                                                            return null;
-                                                        };
-                                                        const target = findComment(activeComments);
-                                                        if (target && target.duration) {
-                                                            setSelectionRange({ start: target.timestamp, end: target.timestamp + target.duration });
                                                         } else {
                                                             setSelectionRange({ start: null, end: null });
                                                         }
@@ -1356,7 +1364,7 @@ const ProjectView = () => {
                                 setSelectionRange({ start: null, end: null });
                             }}
                             onCommentClick={(time, annotation, commentId, comment) => {
-                                if (isVideo) {
+                                if (isVideo && time !== undefined && time !== null) {
                                     videoPlayerRef.current?.seek(time);
                                     videoPlayerRef.current?.pause();
                                 } else if (isThreeD && comment?.cameraState) {
