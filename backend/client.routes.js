@@ -185,6 +185,8 @@ router.post('/projects/:token/comments', commentLimiter, commentUpload.single('a
         return res.status(400).json({ error: 'Guest name exceeds 100 characters' });
     }
 
+    const safeGuestName = sanitizeHtml(guestName);
+
     // Validate attachment
     let attachmentPath = null;
     if (attachmentFile) {
@@ -261,7 +263,7 @@ router.post('/projects/:token/comments', commentLimiter, commentUpload.single('a
             content: sanitizeHtml(content),
             timestamp: parseFloat(timestamp),
             annotation: annotation ? (typeof annotation === 'string' ? annotation : JSON.stringify(annotation)) : null,
-            guestName: guestName,
+            guestName: safeGuestName,
             isVisibleToClient: true,
             parentId: parentId ? parseInt(parentId) : null,
             cameraState: cameraState ? (typeof cameraState === 'string' ? cameraState : JSON.stringify(cameraState)) : null,

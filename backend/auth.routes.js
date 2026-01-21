@@ -5,6 +5,7 @@ const { PrismaClient } = require('@prisma/client');
 const { authenticateToken, requireAdmin, JWT_SECRET, isDefaultSecret } = require('./middleware');
 const { rateLimit } = require('./utils/rateLimiter');
 const { isValidPassword, isValidEmail, isValidText } = require('./utils/validation');
+const { sanitizeHtml } = require('./utils/security');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -84,12 +85,14 @@ router.post('/setup', async (req, res) => {
       return res.status(400).json({ error: 'Password must be 8-128 characters long and contain at least one letter and one number.' });
     }
 
+    const safeName = sanitizeHtml(name);
+
     const hashedPassword = await bcrypt.hash(password, 10);
     const user = await prisma.user.create({
       data: {
         email,
         password: hashedPassword,
-        name,
+        name: safeName,
         role: 'admin'
       }
     });
@@ -122,6 +125,8 @@ router.post('/register', registerLimiter, async (req, res) => {
     return res.status(400).json({ error: 'Name exceeds 100 characters' });
   }
 
+  const safeName = sanitizeHtml(name);
+
   if (!isValidPassword(password)) {
     return res.status(400).json({ error: 'Password must be 8-128 characters long and contain at least one letter and one number.' });
   }
@@ -150,7 +155,7 @@ router.post('/register', registerLimiter, async (req, res) => {
         data: {
           email: invite.email,
           password: hashedPassword,
-          name: name,
+          name: safeName,
           role: invite.role
         }
       });
@@ -298,7 +303,7 @@ router.put('/me', authenticateToken, upload.single('avatar'), async (req, res) =
       if (!isValidText(name, 100)) {
         return res.status(400).json({ error: 'Name exceeds 100 characters' });
       }
-      data.name = name;
+      data.name = sanitizeHtml(name);
     }
     if (email) {
       if (!isValidEmail(email)) {
@@ -369,6 +374,8 @@ router.post('/users', authenticateToken, requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Name exceeds 100 characters' });
     }
 
+    const safeName = sanitizeHtml(name);
+
     if (!isValidPassword(password)) {
       return res.status(400).json({ error: 'Password must be 8-128 characters long and contain at least one letter and one number.' });
     }
@@ -378,7 +385,7 @@ router.post('/users', authenticateToken, requireAdmin, async (req, res) => {
       data: {
         email,
         password: hashedPassword,
-        name,
+        name: safeName,
         role: 'user' // Default role
       }
     });
