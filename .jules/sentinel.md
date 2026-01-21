@@ -22,3 +22,8 @@
 **Vulnerability:** The comment creation endpoints (`/api/client/projects/:token/comments` and `/api/projects/:id/comments`) accepted raw HTML content and stored it directly in the database. When retrieved and rendered by the frontend, this allowed for Stored Cross-Site Scripting (XSS) attacks.
 **Learning:** Never trust user input, especially text fields that might be rendered as HTML. Frontend rendering context (like React's `dangerouslySetInnerHTML`) assumes sanitized input, but the backend must enforce this sanitization to be secure by default.
 **Prevention:** Implement server-side sanitization using a library like `xss` for all user-submitted text content before storage. This ensures that even if the frontend fails to escape output, the stored data is safe.
+
+## 2026-05-20 - Wildcard Injection and Excessive Scope in User Search
+**Vulnerability:** The `GET /api/users/search` endpoint used user input directly in Prisma's `contains` filter without sanitization, allowing wildcard injection (`%`) to enumerate all users. Additionally, it lacked authorization scoping, allowing any user to search the entire user database.
+**Learning:** Prisma's `contains` operator passes wildcard characters like `%` and `_` through to the database `LIKE` operator, which can be abused. Also, collaborative features must still respect tenant/team isolation.
+**Prevention:** Sanitize or strip special characters from search inputs used with `contains`. Always scope queries to the user's authorized context (e.g., mutual teams).
