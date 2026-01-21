@@ -345,4 +345,101 @@ router.delete('/projects/:token/comments/:commentId', async (req, res) => {
     }
 });
 
+// PATCH /api/client/projects/:token/comments/:commentId
+// Guest comment editing
+router.patch('/projects/:token/comments/:commentId', async (req, res) => {
+    const { token, commentId } = req.params;
+    const { guestName, content, annotation } = req.body;
+
+    if (!guestName) return res.status(400).json({ error: 'Guest name is required for verification' });
+    if (!content && annotation === undefined) return res.status(400).json({ error: 'Content or annotation is required' });
+
+    // Validate content length if provided
+    if (content && !isValidText(content, 5000)) {
+        return res.status(400).json({ error: 'Comment content exceeds 5000 characters' });
+    }
+
+    // Validate annotation if provided
+    if (annotation !== undefined && annotation !== null) {
+        try {
+            if (typeof annotation === 'string') {
+                JSON.parse(annotation);
+            }
+        } catch (e) {
+            return res.status(400).json({ error: 'Invalid annotation format' });
+        }
+    }
+
+    try {
+        const project = await prisma.project.findUnique({
+            where: { clientToken: token }
+        });
+
+        if (!project) return res.status(404).json({ error: 'Project not found' });
+
+        // Check if reviews are active
+        if (project.status === 'INTERNAL_REVIEW') return res.status(403).json({ error: 'Review not active' });
+        if (project.status === 'ALL_REVIEWS_DONE') return res.status(403).json({ error: 'Project is read-only' });
+
+        const comment = await prisma.comment.findUnique({
+            where: { id: parseInt(commentId) },
+            include: {
+                video: { select: { projectId: true } },
+                image: { include: { bundle: { select: { projectId: true } } } },
+                threeDAsset: { select: { projectId: true } },
+                user: { select: { id: true, name: true } },
+                replies: {
+                    include: {
+                        user: { select: { id: true, name: true } }
+                    }
+                }
+            }
+        });
+
+        if (!comment) return res.status(404).json({ error: 'Comment not found' });
+
+        // Verify ownership
+        if (comment.guestName !== guestName) {
+            return res.status(403).json({ error: 'You can only edit your own comments' });
+        }
+
+        // Verify comment belongs to this project
+        let commentProjectId = null;
+        if (comment.video) commentProjectId = comment.video.projectId;
+        else if (comment.image && comment.image.bundle) commentProjectId = comment.image.bundle.projectId;
+        else if (comment.threeDAsset) commentProjectId = comment.threeDAsset.projectId;
+
+        if (commentProjectId !== project.id) {
+            return res.status(404).json({ error: 'Comment not found in this project' });
+        }
+
+        // Build update data
+        const updateData = { isEdited: true };
+        if (content !== undefined) updateData.content = content;
+        if (annotation !== undefined) {
+            updateData.annotation = annotation ? (typeof annotation === 'string' ? annotation : JSON.stringify(annotation)) : null;
+        }
+
+        // Update comment
+        const updatedComment = await prisma.comment.update({
+            where: { id: parseInt(commentId) },
+            data: updateData,
+            include: {
+                user: { select: { id: true, name: true } },
+                replies: {
+                    include: {
+                        user: { select: { id: true, name: true } }
+                    }
+                }
+            }
+        });
+
+        res.json(updatedComment);
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to update comment' });
+    }
+});
+
 module.exports = router;

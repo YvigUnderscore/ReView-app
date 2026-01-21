@@ -173,7 +173,15 @@ const ImageViewer = forwardRef(({ src, onNext, onPrev, hasPrev, hasNext, annotat
             canUndo: historyIndex > 0
         }),
         undoAnnotation: handleUndo,
-        sendAnnotations: handleSendReview
+        sendAnnotations: handleSendReview,
+        loadAnnotations: (annotationsArray) => {
+            if (Array.isArray(annotationsArray)) {
+                setLocalAnnotations(annotationsArray);
+                setIsDrawingMode(true);
+                if (onDrawingModeChange) onDrawingModeChange(true);
+                updateCanvasLayout();
+            }
+        }
     }));
 
     // Coordinate Normalization Helpers
@@ -379,11 +387,8 @@ const ImageViewer = forwardRef(({ src, onNext, onPrev, hasPrev, hasNext, annotat
         if (viewingAnnotation) {
             setLocalAnnotations(viewingAnnotation);
         } else if (!isDrawingMode) {
-            // Restore draft if available? No, prop takes precedence if viewing.
-            // If just canceling mode, maybe keep draft?
-            // "Reprendre de 0" logic...
-            // If no viewing annotation, clear?
-            // Only if closing.
+            // Clear annotations when navigating to a comment without annotations
+            setLocalAnnotations([]);
         }
     }, [viewingAnnotation, isDrawingMode, src]);
 

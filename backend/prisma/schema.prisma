@@ -245,6 +245,7 @@ model Comment {
   attachmentPath String? // Path to the user uploaded attachment
   isResolved Boolean  @default(false)
   isVisibleToClient Boolean @default(false)
+  isEdited   Boolean  @default(false)
   createdAt  DateTime @default(now())
 
   parentId   Int?
