@@ -22,6 +22,7 @@ import SettingsPage from './pages/SettingsPage';
 import GuidePage from './pages/GuidePage';
 import LatestUpdatePage from './pages/LatestUpdatePage';
 import TeamSettings from './pages/Team/TeamSettings';
+import TeamRoles from './pages/Team/TeamRoles';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { HeaderProvider, useHeader } from './context/HeaderContext';
 import { ThemeProvider } from './context/ThemeContext';
@@ -1643,6 +1644,11 @@ const AppRoutes = () => {
                                 </PageTransition>
                             } />
 
+                            <Route path="/team/roles" element={
+                                <PageTransition>
+                                    <TeamRoles />
+                                </PageTransition>
+                            } />
                             <Route path="/team/settings" element={
                                 <PageTransition>
                                     <TeamSettings />

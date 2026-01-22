@@ -75,63 +75,171 @@ async function addToQueue(teamId, type, data) {
     });
 }
 
-// 3. Main Notify Function
-async function notifyDiscord(teamId, eventType, data) {
+// 3. Main Notify Function - now supports multiple Discord channels
+async function notifyDiscord(teamId, eventType, data, options = {}) {
     if (!teamId) return;
 
-    const team = await prisma.team.findUnique({ where: { id: teamId } });
-    if (!team || !team.discordWebhookUrl) return;
-
-    const timing = team.discordTiming || 'REALTIME';
-
-    // MAJOR Logic: Only notify major events
-    if (timing === 'MAJOR') {
-        const majorEvents = ['STATUS_CHANGE', 'VIDEO_VERSION', 'PROJECT_CREATE'];
-        if (!majorEvents.includes(eventType)) return;
-        // If major, send immediately
-        await processInstantNotification(team, eventType, data);
-        return;
-    }
-
-    // HYBRID Logic
-    if (timing === 'HYBRID') {
-        const instantEvents = ['MENTION', 'STATUS_CHANGE', 'VIDEO_VERSION', 'PROJECT_CREATE'];
-        if (instantEvents.includes(eventType)) {
-            await processInstantNotification(team, eventType, data);
-        } else {
-            // Queue everything else (Comments)
-            await addToQueue(team.id, eventType, data);
+    const team = await prisma.team.findUnique({
+        where: { id: teamId },
+        include: {
+            discordChannels: {
+                include: {
+                    teamRoles: true
+                }
+            }
         }
-        return;
+    });
+    if (!team) return;
+
+    // Get channels to notify
+    const channelsToNotify = await getChannelsToNotify(team, data, options);
+
+    // If no channels and no main webhook, exit
+    if (channelsToNotify.length === 0 && !team.discordWebhookUrl) return;
+
+    // If no custom channels, use main webhook
+    if (channelsToNotify.length === 0 && team.discordWebhookUrl) {
+        channelsToNotify.push({
+            webhookUrl: team.discordWebhookUrl,
+            botName: team.discordBotName,
+            botAvatar: team.discordBotAvatar,
+            timing: team.discordTiming || 'REALTIME',
+            notificationMode: 'VIDEO', // Default for main webhook
+            burnAnnotations: team.discordBurnAnnotations
+        });
     }
 
-    // GROUPED / HOURLY Logic
-    if (timing === 'GROUPED' || timing === 'HOURLY') {
-        await addToQueue(team.id, eventType, data);
-        return;
-    }
+    // Process each channel
+    for (const channel of channelsToNotify) {
+        const timing = channel.timing || team.discordTiming || 'REALTIME';
 
-    // REALTIME (Default)
-    await processInstantNotification(team, eventType, data);
+        // MAJOR Logic: Only notify major events
+        if (timing === 'MAJOR') {
+            const majorEvents = ['STATUS_CHANGE', 'VIDEO_VERSION', 'PROJECT_CREATE'];
+            if (!majorEvents.includes(eventType)) continue;
+            await processInstantNotification(team, channel, eventType, data);
+            continue;
+        }
+
+        // HYBRID Logic
+        if (timing === 'HYBRID') {
+            const instantEvents = ['MENTION', 'STATUS_CHANGE', 'VIDEO_VERSION', 'PROJECT_CREATE'];
+            if (instantEvents.includes(eventType)) {
+                await processInstantNotification(team, channel, eventType, data);
+            } else {
+                // Queue everything else (Comments)
+                await addToQueue(team.id, eventType, { ...data, channelId: channel.id });
+            }
+            continue;
+        }
+
+        // GROUPED / HOURLY Logic
+        if (timing === 'GROUPED' || timing === 'HOURLY') {
+            await addToQueue(team.id, eventType, { ...data, channelId: channel.id });
+            continue;
+        }
+
+        // REALTIME (Default)
+        await processInstantNotification(team, channel, eventType, data);
+    }
 }
 
-// Helper to construct payload and send
-async function processInstantNotification(team, eventType, data) {
+// Get channels to notify based on project/role association
+async function getChannelsToNotify(team, data, options) {
+    const channels = [];
+
+    // If project has explicit channel assignments, use those
+    if (data.projectId) {
+        const projectChannels = await prisma.projectDiscordChannel.findMany({
+            where: { projectId: data.projectId },
+            include: { channel: { include: { teamRoles: true } } }
+        });
+
+        if (projectChannels.length > 0) {
+            for (const pc of projectChannels) {
+                channels.push({
+                    id: pc.channel.id,
+                    webhookUrl: pc.channel.webhookUrl,
+                    botName: pc.channel.botName || team.discordBotName,
+                    botAvatar: pc.channel.botAvatar || team.discordBotAvatar,
+                    timing: pc.channel.timing || team.discordTiming,
+                    notificationMode: pc.channel.notificationMode || 'VIDEO',
+                    burnAnnotations: pc.channel.burnAnnotations ?? team.discordBurnAnnotations
+                });
+            }
+            return channels;
+        }
+    }
+
+    // Role-based filtering
+    let projectRoleIds = [];
+    if (data.projectId) {
+        // Fetch project roles
+        const project = await prisma.project.findUnique({
+            where: { id: data.projectId },
+            include: { roles: true }
+        });
+        if (project && project.roles) {
+            projectRoleIds = project.roles.map(r => r.id);
+        }
+    }
+
+    // Otherwise, check team channels with role filtering
+    for (const channel of team.discordChannels || []) {
+        // If channel has no role filter, it receives all notifications (Global Channel)
+        if (!channel.teamRoles || channel.teamRoles.length === 0) {
+            channels.push({
+                id: channel.id,
+                webhookUrl: channel.webhookUrl,
+                botName: channel.botName || team.discordBotName,
+                botAvatar: channel.botAvatar || team.discordBotAvatar,
+                timing: channel.timing || team.discordTiming,
+                notificationMode: channel.notificationMode || 'VIDEO',
+                burnAnnotations: channel.burnAnnotations ?? team.discordBurnAnnotations
+            });
+            continue;
+        }
+
+        // If channel HAS role filter, check intersection with project roles
+        if (projectRoleIds.length > 0) {
+            const channelRoleIds = channel.teamRoles.map(r => r.id);
+            const hasCommonRole = projectRoleIds.some(id => channelRoleIds.includes(id));
+
+            if (hasCommonRole) {
+                channels.push({
+                    id: channel.id,
+                    webhookUrl: channel.webhookUrl,
+                    botName: channel.botName || team.discordBotName,
+                    botAvatar: channel.botAvatar || team.discordBotAvatar,
+                    timing: channel.timing || team.discordTiming,
+                    notificationMode: channel.notificationMode || 'VIDEO',
+                    burnAnnotations: channel.burnAnnotations ?? team.discordBurnAnnotations
+                });
+            }
+        }
+        // If project has NO roles, it does NOT trigger channels that REQUIRE roles.
+    }
+
+    return channels;
+}
+
+// Helper to construct payload and send - now accepts channel config
+async function processInstantNotification(team, channel, eventType, data) {
     const publicUrl = await getPublicUrl();
-    const { content, embed, files } = await constructDiscordMessage(eventType, data, publicUrl, team);
+    const { content, embed, files } = await constructDiscordMessage(eventType, data, publicUrl, team, channel);
 
     await sendToDiscord(
-        team.discordWebhookUrl,
+        channel.webhookUrl,
         { content, embeds: embed ? [embed] : [] },
         files,
-        team.discordBotName,
-        team.discordBotAvatar
+        channel.botName,
+        channel.botAvatar
     );
 }
 
 // Construct Message Payload
-// Construct Message Payload
-async function constructDiscordMessage(eventType, data, publicUrl, team) {
+// channel param added for future Image mode support (Phase A)
+async function constructDiscordMessage(eventType, data, publicUrl, team, channel = null) {
     let content = '';
     const projectLink = data.projectSlug ? `${publicUrl}/#/${team.slug}/project/${data.projectSlug}` : `${publicUrl}/#/${team.slug}/dashboard`;
 

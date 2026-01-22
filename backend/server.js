@@ -29,6 +29,7 @@ const adminRoutes = require('./admin.routes');
 const clientRoutes = require('./client.routes');
 const settingsRoutes = require('./settings.routes');
 const roleRoutes = require('./role.routes');
+const discordChannelRoutes = require('./discordChannel.routes');
 const notificationRoutes = require('./notification.routes');
 const userRoutes = require('./user.routes');
 
@@ -90,6 +91,7 @@ app.use('/api/projects', projectRoutes);
 app.use('/api/invites', inviteRoutes);
 app.use('/api/teams', teamRoutes);
 app.use('/api/teams/:teamId/roles', roleRoutes);
+app.use('/api/teams/:teamId/discord-channels', discordChannelRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/admin', adminRoutes);

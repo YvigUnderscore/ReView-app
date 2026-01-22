@@ -395,7 +395,8 @@ router.get('/', authenticateToken, async (req, res) => {
                 },
                 team: {
                     select: { id: true, name: true, slug: true }
-                }
+                },
+                roles: true
             },
             orderBy: { updatedAt: 'desc' }
         });
@@ -684,6 +685,74 @@ router.get('/:id', authenticateToken, async (req, res) => {
     }
 });
 
+// PATCH /projects/:id/roles: Update project roles (tags)
+router.patch('/:id/roles', authenticateToken, async (req, res) => {
+    try {
+        const projectId = parseInt(req.params.id);
+        const { roleIds } = req.body; // Array of role IDs
+
+        if (isNaN(projectId) || !Array.isArray(roleIds)) {
+            return res.status(400).json({ error: 'Invalid input' });
+        }
+
+        const project = await prisma.project.findUnique({
+            where: { id: projectId },
+            include: { team: true }
+        });
+
+        if (!project) return res.status(404).json({ error: 'Project not found' });
+
+        // Check access (must be admin or team member with manage permissions?)
+        // Assuming team members can edit project settings if they have access to team
+        // Or restrict to owner/admin?
+        // Let's stick to standard check: User must be in the team.
+        const user = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            include: {
+                teamMemberships: { where: { teamId: project.teamId } },
+                ownedTeams: { where: { id: project.teamId } }
+            }
+        });
+
+        const isOwner = user.ownedTeams.length > 0;
+        const isMember = user.teamMemberships.length > 0;
+        const isAdmin = user.role === 'admin';
+
+        if (!isOwner && !isMember && !isAdmin) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        // Validate that roles belong to the same team
+        const validRoles = await prisma.teamRole.count({
+            where: {
+                id: { in: roleIds },
+                teamId: project.teamId
+            }
+        });
+
+        if (validRoles !== roleIds.length) {
+            // Some roles might not belong to the team or not exist
+            return res.status(400).json({ error: 'Invalid roles provided' });
+        }
+
+        // Update project roles
+        await prisma.project.update({
+            where: { id: projectId },
+            data: {
+                roles: {
+                    set: roleIds.map(id => ({ id }))
+                }
+            }
+        });
+
+        res.json({ success: true });
+
+    } catch (error) {
+        console.error('Error updating project roles:', error);
+        res.status(500).json({ error: 'Failed to update roles' });
+    }
+});
+
 // POST /projects: Create new project
 router.post('/', authenticateToken, projectRateLimiter, upload.fields([{ name: 'file', maxCount: 1 }, { name: 'images', maxCount: 50 }, { name: 'thumbnail', maxCount: 1 }]), async (req, res) => {
     const videoFile = req.files.file ? req.files.file[0] : null;
@@ -892,13 +961,26 @@ router.post('/', authenticateToken, projectRateLimiter, upload.fields([{ name: '
             thumbnailPath = path.join(teamSlugToUse, slug, thumbName).replace(/\\/g, '/');
         }
 
+        // Parse roleIds if present
+        let roleIdsParsed = [];
+        if (req.body.roleIds) {
+            try {
+                roleIdsParsed = JSON.parse(req.body.roleIds);
+            } catch (e) {
+                console.warn('Failed to parse roleIds', e);
+            }
+        }
+
         let projectData = {
             name: name || 'Untitled Project',
             description: description || '',
             teamId: parsedTeamId,
             thumbnailPath,
             hasCustomThumbnail,
-            slug
+            slug,
+            roles: roleIdsParsed.length > 0 ? {
+                connect: roleIdsParsed.map(id => ({ id: parseInt(id) }))
+            } : undefined
         };
 
         if (videoFile) {

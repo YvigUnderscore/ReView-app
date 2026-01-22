@@ -1,7 +1,7 @@
 -- Add digest settings columns to Team
-ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "digestFps" INTEGER;
-ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "digestTransition" REAL;
-ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "digestPause" REAL;
+ALTER TABLE "Team" ADD COLUMN "digestFps" INTEGER;
+ALTER TABLE "Team" ADD COLUMN "digestTransition" REAL;
+ALTER TABLE "Team" ADD COLUMN "digestPause" REAL;
 
 -- Seed default SystemSettings for digest video
 INSERT INTO "SystemSetting" (key, value) VALUES 
