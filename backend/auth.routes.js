@@ -5,6 +5,7 @@ const { PrismaClient } = require('@prisma/client');
 const { authenticateToken, requireAdmin, JWT_SECRET, isDefaultSecret } = require('./middleware');
 const { rateLimit } = require('./utils/rateLimiter');
 const { isValidPassword, isValidEmail, isValidText } = require('./utils/validation');
+const { sanitizeHtml } = require('./utils/security');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -89,7 +90,7 @@ router.post('/setup', async (req, res) => {
       data: {
         email,
         password: hashedPassword,
-        name,
+        name: sanitizeHtml(name),
         role: 'admin'
       }
     });
@@ -150,7 +151,7 @@ router.post('/register', registerLimiter, async (req, res) => {
         data: {
           email: invite.email,
           password: hashedPassword,
-          name: name,
+          name: sanitizeHtml(name),
           role: invite.role
         }
       });
@@ -298,7 +299,7 @@ router.put('/me', authenticateToken, upload.single('avatar'), async (req, res) =
       if (!isValidText(name, 100)) {
         return res.status(400).json({ error: 'Name exceeds 100 characters' });
       }
-      data.name = name;
+      data.name = sanitizeHtml(name);
     }
     if (email) {
       if (!isValidEmail(email)) {
@@ -378,7 +379,7 @@ router.post('/users', authenticateToken, requireAdmin, async (req, res) => {
       data: {
         email,
         password: hashedPassword,
-        name,
+        name: sanitizeHtml(name),
         role: 'user' // Default role
       }
     });

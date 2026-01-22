@@ -4,6 +4,7 @@ const { PrismaClient } = require('@prisma/client');
 const { authenticateToken, requireAdmin } = require('./middleware');
 const { sendEmail } = require('./services/emailService');
 const { isValidEmail, isValidText, isValidPassword } = require('./utils/validation');
+const { sanitizeHtml } = require('./utils/security');
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -251,7 +252,7 @@ router.patch('/users/:id', authenticateToken, requireAdmin, async (req, res) => 
         const data = {};
         if (name) {
             if (!isValidText(name, 100)) return res.status(400).json({ error: 'Invalid name' });
-            data.name = name;
+            data.name = sanitizeHtml(name);
         }
         if (email) {
             if (!isValidEmail(email)) return res.status(400).json({ error: 'Invalid email' });
