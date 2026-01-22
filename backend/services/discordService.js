@@ -82,6 +82,7 @@ async function notifyDiscord(teamId, eventType, data, options = {}) {
     const team = await prisma.team.findUnique({
         where: { id: teamId },
         include: {
+            roles: true,
             discordChannels: {
                 include: {
                     teamRoles: true
@@ -184,6 +185,16 @@ async function getChannelsToNotify(team, data, options) {
         }
     }
 
+    // Mention-based filtering (Bypass Logic)
+    let mentionedRoleIds = [];
+    if (data.content && team.roles) {
+        team.roles.forEach(role => {
+            if (data.content.includes(`@${role.name}`)) {
+                mentionedRoleIds.push(role.id);
+            }
+        });
+    }
+
     // Otherwise, check team channels with role filtering
     for (const channel of team.discordChannels || []) {
         // If channel has no role filter, it receives all notifications (Global Channel)
@@ -200,22 +211,22 @@ async function getChannelsToNotify(team, data, options) {
             continue;
         }
 
-        // If channel HAS role filter, check intersection with project roles
-        if (projectRoleIds.length > 0) {
-            const channelRoleIds = channel.teamRoles.map(r => r.id);
-            const hasCommonRole = projectRoleIds.some(id => channelRoleIds.includes(id));
+        // If channel HAS role filter, check intersection with project roles OR Mentions
+        const channelRoleIds = channel.teamRoles.map(r => r.id);
 
-            if (hasCommonRole) {
-                channels.push({
-                    id: channel.id,
-                    webhookUrl: channel.webhookUrl,
-                    botName: channel.botName || team.discordBotName,
-                    botAvatar: channel.botAvatar || team.discordBotAvatar,
-                    timing: channel.timing || team.discordTiming,
-                    notificationMode: channel.notificationMode || 'VIDEO',
-                    burnAnnotations: channel.burnAnnotations ?? team.discordBurnAnnotations
-                });
-            }
+        const hasProjectRoleMatch = projectRoleIds.length > 0 && projectRoleIds.some(id => channelRoleIds.includes(id));
+        const hasMentionMatch = mentionedRoleIds.length > 0 && mentionedRoleIds.some(id => channelRoleIds.includes(id));
+
+        if (hasProjectRoleMatch || hasMentionMatch) {
+            channels.push({
+                id: channel.id,
+                webhookUrl: channel.webhookUrl,
+                botName: channel.botName || team.discordBotName,
+                botAvatar: channel.botAvatar || team.discordBotAvatar,
+                timing: channel.timing || team.discordTiming,
+                notificationMode: channel.notificationMode || 'VIDEO',
+                burnAnnotations: channel.burnAnnotations ?? team.discordBurnAnnotations
+            });
         }
         // If project has NO roles, it does NOT trigger channels that REQUIRE roles.
     }
