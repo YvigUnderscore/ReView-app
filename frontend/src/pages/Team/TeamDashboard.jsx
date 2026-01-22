@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, UserPlus, Shield, X, Check, Search, Copy, ChevronDown, Settings } from 'lucide-react';
+import { Plus, UserPlus, Shield, X, Search, ChevronDown, Settings } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import ConfirmDialog from '../../components/ConfirmDialog';
@@ -29,13 +29,10 @@ const TeamDashboard = () => {
 
 
     // Invite / Add Member State
-    const [inviteEmail, setInviteEmail] = useState(''); // Used for invite link generation if search fails
     const [inviteRole, setInviteRole] = useState('MEMBER'); // Default to MEMBER
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState([]);
     const [isSearching, setIsSearching] = useState(false);
-    const [generatedInviteLink, setGeneratedInviteLink] = useState(null);
-    const [copied, setCopied] = useState(false);
 
     const fetchTeams = useCallback(() => {
         fetch('/api/teams', {
@@ -101,7 +98,7 @@ const TeamDashboard = () => {
         }
         setIsSearching(true);
         const timer = setTimeout(() => {
-            fetch(`/api/users/search?q=${encodeURIComponent(searchQuery)}`, {
+            fetch(`/api/users/search?q=${encodeURIComponent(searchQuery)}&context=addMember`, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
             })
                 .then(res => res.json())
@@ -184,43 +181,7 @@ const TeamDashboard = () => {
         } catch (err) { console.error(err); }
     };
 
-    const generateInvite = async () => {
-        try {
-            const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-            const emailToUse = emailRegex.test(inviteEmail) ? inviteEmail : undefined;
 
-            const res = await fetch('/api/invites', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('token')}`
-                },
-                body: JSON.stringify({ email: emailToUse })
-            });
-
-            if (res.ok) {
-                const data = await res.json();
-                const link = `${window.location.origin}/register?invite=${data.token}`;
-                setGeneratedInviteLink(link);
-                setCopied(false);
-            } else {
-                const err = await res.json();
-                toast.error(err.error || 'Failed to generate invite');
-            }
-        } catch (e) {
-            console.error(e);
-            toast.error('Error generating invite');
-        }
-    };
-
-    const copyToClipboard = () => {
-        if (generatedInviteLink) {
-            navigator.clipboard.writeText(generatedInviteLink);
-            setCopied(true);
-            toast.success("Link copied!");
-            setTimeout(() => setCopied(false), 2000);
-        }
-    };
 
     const createRole = async (e) => {
         e.preventDefault();
@@ -396,7 +357,6 @@ const TeamDashboard = () => {
                                                     onClick={() => {
                                                         setSearchQuery('');
                                                         setSearchResults([]);
-                                                        setGeneratedInviteLink(null);
                                                         setShowInviteModal(true);
                                                     }}
                                                     className="border border-border hover:bg-muted px-3 py-1.5 rounded text-sm flex items-center gap-2"
@@ -624,90 +584,46 @@ const TeamDashboard = () => {
                     <div className="bg-card p-6 rounded-lg w-[400px] border border-border">
                         <h3 className="font-bold mb-4">Add Member to Team</h3>
 
-                        {!generatedInviteLink ? (
-                            <>
-                                <div className="relative mb-4">
-                                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                                    <input
-                                        className="w-full bg-background border border-input rounded p-2 pl-9 text-sm"
-                                        placeholder="Search by name or email..."
-                                        value={searchQuery}
-                                        onChange={e => {
-                                            setSearchQuery(e.target.value);
-                                            setInviteEmail(e.target.value); // Use query as email fallback if typical
-                                        }}
-                                        autoFocus
-                                    />
-                                </div>
+                        <div className="relative mb-4">
+                            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                            <input
+                                className="w-full bg-background border border-input rounded p-2 pl-9 text-sm"
+                                placeholder="Search by name or email..."
+                                value={searchQuery}
+                                onChange={e => setSearchQuery(e.target.value)}
+                                autoFocus
+                            />
+                        </div>
 
-                                {/* Search Results */}
-                                {searchQuery.length >= 2 && (
-                                    <div className="mb-4 max-h-40 overflow-y-auto border border-border rounded bg-muted/20">
-                                        {isSearching ? (
-                                            <div className="p-2 text-xs text-center text-muted-foreground">Searching...</div>
-                                        ) : searchResults.length > 0 ? (
-                                            searchResults.map(user => (
-                                                <button
-                                                    key={user.id}
-                                                    onClick={() => addMemberDirectly(user.email)}
-                                                    className="w-full flex items-center gap-2 p-2 hover:bg-muted text-left transition-colors"
-                                                >
-                                                    <div className="w-6 h-6 rounded-full overflow-hidden bg-primary/20 shrink-0">
-                                                        {user.avatarPath ? (
-                                                            <img src={`/api/media/avatars/${user.avatarPath}`} className="w-full h-full object-cover" />
-                                                        ) : (
-                                                            <div className="w-full h-full flex items-center justify-center text-[10px]">{user.name.charAt(0)}</div>
-                                                        )}
-                                                    </div>
-                                                    <div className="flex flex-col overflow-hidden">
-                                                        <span className="text-sm font-medium truncate">{user.name}</span>
-                                                        <span className="text-xs text-muted-foreground truncate">{user.email}</span>
-                                                    </div>
-                                                    <Plus size={14} className="ml-auto text-muted-foreground" />
-                                                </button>
-                                            ))
-                                        ) : (
-                                            <div className="p-2 text-xs text-center text-muted-foreground">No users found</div>
-                                        )}
-                                    </div>
-                                )}
-
-                                <div className="flex items-center justify-between mb-4">
-                                    <span className="text-xs text-muted-foreground">Or generate an invite link</span>
-                                    <div className="h-px bg-border flex-1 ml-2"></div>
-                                </div>
-
-                                <button
-                                    onClick={generateInvite}
-                                    className="w-full border border-primary/30 bg-primary/5 hover:bg-primary/10 text-primary py-2 rounded text-sm flex items-center justify-center gap-2 transition-colors"
-                                >
-                                    Generate Invite Link
-                                </button>
-                            </>
-                        ) : (
-                            <div className="space-y-4 animate-in fade-in zoom-in-95">
-                                <div className="p-3 bg-muted/30 rounded border border-border flex flex-col gap-2">
-                                    <span className="text-xs font-medium text-muted-foreground">Invite Link Generated:</span>
-                                    <div className="flex gap-2">
-                                        <input
-                                            readOnly
-                                            value={generatedInviteLink}
-                                            className="flex-1 bg-background border border-input rounded px-2 py-1 text-xs select-all"
-                                        />
-                                        <button onClick={copyToClipboard} className="p-1.5 bg-primary text-primary-foreground rounded hover:opacity-90">
-                                            {copied ? <Check size={14} /> : <Copy size={14} />}
+                        {/* Search Results */}
+                        {searchQuery.length >= 2 && (
+                            <div className="mb-4 max-h-60 overflow-y-auto border border-border rounded bg-muted/20">
+                                {isSearching ? (
+                                    <div className="p-4 text-sm text-center text-muted-foreground">Searching...</div>
+                                ) : searchResults.length > 0 ? (
+                                    searchResults.map(user => (
+                                        <button
+                                            key={user.id}
+                                            onClick={() => addMemberDirectly(user.email)}
+                                            className="w-full flex items-center gap-2 p-2 hover:bg-muted text-left transition-colors"
+                                        >
+                                            <div className="w-6 h-6 rounded-full overflow-hidden bg-primary/20 shrink-0">
+                                                {user.avatarPath ? (
+                                                    <img src={`/api/media/avatars/${user.avatarPath}`} className="w-full h-full object-cover" />
+                                                ) : (
+                                                    <div className="w-full h-full flex items-center justify-center text-[10px]">{user.name.charAt(0)}</div>
+                                                )}
+                                            </div>
+                                            <div className="flex flex-col overflow-hidden">
+                                                <span className="text-sm font-medium truncate">{user.name}</span>
+                                                <span className="text-xs text-muted-foreground truncate">{user.email}</span>
+                                            </div>
+                                            <Plus size={14} className="ml-auto text-muted-foreground" />
                                         </button>
-                                    </div>
-                                </div>
-                                <p className="text-xs text-muted-foreground">
-                                    Share this link with the person you want to invite. They will be able to register and you can add them to the team afterwards.
-                                </p>
-                                <button
-                                    onClick={() => { setGeneratedInviteLink(null); setSearchQuery(''); }}
-                                    className="text-xs text-primary hover:underline w-full text-center"
-                                >
-                                    Back to search
-                                </button>
+                                    ))
+                                ) : (
+                                    <div className="p-4 text-sm text-center text-muted-foreground">No users found. The user must have an account on ReView to be added.</div>
+                                )}
                             </div>
                         )}
 
