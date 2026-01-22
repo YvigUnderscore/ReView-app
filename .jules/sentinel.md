@@ -27,3 +27,8 @@
 **Vulnerability:** The `GET /api/users/search` endpoint used user input directly in Prisma's `contains` filter without sanitization, allowing wildcard injection (`%`) to enumerate all users. Additionally, it lacked authorization scoping, allowing any user to search the entire user database.
 **Learning:** Prisma's `contains` operator passes wildcard characters like `%` and `_` through to the database `LIKE` operator, which can be abused. Also, collaborative features must still respect tenant/team isolation.
 **Prevention:** Sanitize or strip special characters from search inputs used with `contains`. Always scope queries to the user's authorized context (e.g., mutual teams).
+
+## 2026-05-23 - Socket.IO Unauthorized Room Access
+**Vulnerability:** Authenticated users could join any project's real-time room by emitting `join_project` with an arbitrary project ID, receiving sensitive updates (comments, versions) without team membership checks.
+**Learning:** Socket.IO events like `join_room` are not protected by standard HTTP middleware; explicit authorization checks must be performed within the socket event handler.
+**Prevention:** Always verify ownership/membership using shared auth utilities (e.g., `checkProjectAccess`) inside socket event handlers before joining sensitive rooms.
