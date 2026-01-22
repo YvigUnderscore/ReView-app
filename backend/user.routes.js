@@ -21,8 +21,8 @@ router.get('/search', authenticateToken, async (req, res) => {
     try {
         const whereClause = {
             OR: [
-                { name: { contains: safeQ, mode: 'insensitive' } },
-                { email: { contains: safeQ, mode: 'insensitive' } }
+                { name: { contains: safeQ } },
+                { email: { contains: safeQ } }
             ]
         };
 
