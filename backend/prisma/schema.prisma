@@ -74,6 +74,8 @@ model TeamRole {
   team      Team     @relation(fields: [teamId], references: [id])
   teamId    Int
   users     User[]   @relation("UserRoles")
+  channels  DiscordChannel[] @relation("ChannelRoles")
+  projects  Project[] @relation("ProjectRoles")
 }
 
 model Notification {
@@ -124,6 +126,8 @@ model Team {
   digestTransition Float?    // Transition duration in seconds
   digestPause      Float?    // Pause duration in seconds
   digestVideoEnabled Boolean @default(true)
+  
+  discordChannels DiscordChannel[]
 }
 
 model TeamMembership {
@@ -170,6 +174,9 @@ model Project {
   mutedBy     User[]   @relation("MutedProjects")
 
   deletedAt   DateTime?
+  
+  discordChannels ProjectDiscordChannel[]
+  roles           TeamRole[] @relation("ProjectRoles")
 
   @@unique([teamId, slug])
 }
@@ -306,4 +313,39 @@ model EmailQueue {
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+// Discord Channels - Custom webhooks per department/role
+model DiscordChannel {
+  id              Int       @id @default(autoincrement())
+  name            String
+  webhookUrl      String
+  team            Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId          Int
+  
+  // Notification settings (null = fallback to team settings)
+  botName         String?
+  botAvatar       String?
+  notificationMode String   @default("VIDEO") // "VIDEO" | "IMAGE"
+  timing          String?   // null = use team timing
+  burnAnnotations Boolean?  // null = use team setting
+  
+  // Department filtering - which roles trigger this channel
+  teamRoles       TeamRole[] @relation("ChannelRoles")
+  
+  // Projects explicitly assigned to this channel
+  projects        ProjectDiscordChannel[]
+  
+  createdAt       DateTime  @default(now())
+}
+
+// Link table for Project <-> DiscordChannel many-to-many
+model ProjectDiscordChannel {
+  id              Int            @id @default(autoincrement())
+  project         Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId       Int
+  channel         DiscordChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  channelId       Int
+  
+  @@unique([projectId, channelId])
 }

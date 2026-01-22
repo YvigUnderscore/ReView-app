@@ -13,15 +13,8 @@ const TeamDashboard = () => {
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [showInviteModal, setShowInviteModal] = useState(false);
 
-    // Roles state
-    const [teamRoles, setTeamRoles] = useState([]);
-    const [showRoleModal, setShowRoleModal] = useState(false);
-    const [newRoleName, setNewRoleName] = useState('');
-    const [newRoleColor, setNewRoleColor] = useState('#3b82f6');
-    const [activeMemberMenuId, setActiveMemberMenuId] = useState(null); // Member ID for whom the role menu is open
-    const [activeRoleDropdownId, setActiveRoleDropdownId] = useState(null); // Member ID for whom the main role dropdown is open
+    const [activeRoleDropdownId, setActiveRoleDropdownId] = useState(null);
 
-    // Confirmation Dialog
     const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, title: '', message: '', onConfirm: () => { }, isDestructive: false });
 
     // Forms
@@ -63,34 +56,12 @@ const TeamDashboard = () => {
             });
     }, []);
 
-    const fetchRoles = useCallback((teamId) => {
-        if (!teamId) return;
-        fetch(`/api/teams/${teamId}/roles`, {
-            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-        })
-            .then(res => res.json())
-            .then(data => {
-                if (Array.isArray(data)) setTeamRoles(data);
-                else setTeamRoles([]);
-            })
-            .catch(err => {
-                console.error("Failed to fetch roles", err);
-                setTeamRoles([]);
-            });
-    }, []);
 
+
+    // Search Logic - Placeholder for spacing
     useEffect(() => {
         fetchTeams();
     }, [fetchTeams]);
-
-    useEffect(() => {
-        if (activeTeam) {
-            fetchRoles(activeTeam.id);
-        }
-    }, [activeTeam, fetchRoles]);
-
-
-    // Search Logic
     useEffect(() => {
         if (searchQuery.length < 2) {
             setSearchResults([]);
@@ -348,7 +319,7 @@ const TeamDashboard = () => {
                                         {(isOwner || isAdmin) && (
                                             <>
                                                 <button
-                                                    onClick={() => setShowRoleModal(true)}
+                                                    onClick={() => navigate('/team/roles')}
                                                     className="border border-border hover:bg-muted px-3 py-1.5 rounded text-sm flex items-center gap-2"
                                                 >
                                                     <Shield size={14} /> Manage Roles
@@ -403,51 +374,7 @@ const TeamDashboard = () => {
                                                             <div className="flex flex-col">
                                                                 <div className="flex items-center gap-2">
                                                                     {member.name || 'Unknown'}
-                                                                    {(isOwner || isAdmin) && (
-                                                                        <div className="relative">
-                                                                            <button
-                                                                                onClick={(e) => {
-                                                                                    e.stopPropagation();
-                                                                                    setActiveMemberMenuId(activeMemberMenuId === member.id ? null : member.id);
-                                                                                    setActiveRoleDropdownId(null);
-                                                                                }}
-                                                                                className="bg-muted hover:bg-muted/80 p-0.5 rounded-full text-muted-foreground"
-                                                                                title="Manage Tags"
-                                                                            >
-                                                                                <Plus size={12} />
-                                                                            </button>
-                                                                            {activeMemberMenuId === member.id && (
-                                                                                <div className="absolute top-full left-0 mt-1 bg-popover border border-border shadow-lg rounded z-10 w-48 py-1" onClick={e => e.stopPropagation()}>
-                                                                                    {teamRoles.length > 0 ? (
-                                                                                        teamRoles.map(role => {
-                                                                                            const isAssigned = member.teamRoles?.some(r => r.id === role.id);
-                                                                                            return (
-                                                                                                <button
-                                                                                                    key={role.id}
-                                                                                                    onClick={() => {
-                                                                                                        if (isAssigned) {
-                                                                                                            removeRole(member.id, role.id);
-                                                                                                        } else {
-                                                                                                            assignRole(member.id, role.id);
-                                                                                                        }
-                                                                                                    }}
-                                                                                                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted flex items-center justify-between"
-                                                                                                >
-                                                                                                    <div className="flex items-center gap-2">
-                                                                                                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: role.color }}></div>
-                                                                                                        <span>{role.name}</span>
-                                                                                                    </div>
-                                                                                                    {isAssigned && <Check size={12} className="text-primary" />}
-                                                                                                </button>
-                                                                                            );
-                                                                                        })
-                                                                                    ) : (
-                                                                                        <div className="px-3 py-2 text-xs text-muted-foreground text-center">No tags created</div>
-                                                                                    )}
-                                                                                </div>
-                                                                            )}
-                                                                        </div>
-                                                                    )}
+
                                                                 </div>
                                                                 {/* Roles List */}
                                                                 <div className="flex flex-wrap gap-1 mt-1">
@@ -634,52 +561,7 @@ const TeamDashboard = () => {
                 </div>
             )}
 
-            {/* Role Management Modal */}
-            {showRoleModal && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                    <div className="bg-card p-6 rounded-lg w-96 border border-border">
-                        <h3 className="font-bold mb-4">Manage Team Roles</h3>
 
-                        {/* Create New Role */}
-                        <form onSubmit={createRole} className="mb-6 p-3 bg-muted/20 rounded border border-border">
-                            <div className="text-sm font-semibold mb-2">Create Role</div>
-                            <div className="flex gap-2 mb-2">
-                                <input
-                                    className="flex-1 bg-background border border-input rounded p-1.5 text-sm"
-                                    placeholder="Role Name"
-                                    value={newRoleName}
-                                    onChange={e => setNewRoleName(e.target.value)}
-                                    required
-                                />
-                                <input
-                                    type="color"
-                                    className="w-8 h-8 p-0 border-0 rounded cursor-pointer"
-                                    value={newRoleColor}
-                                    onChange={e => setNewRoleColor(e.target.value)}
-                                />
-                            </div>
-                            <button type="submit" className="w-full bg-primary text-primary-foreground py-1 rounded text-sm">Add Role</button>
-                        </form>
-
-                        <div className="space-y-2 max-h-60 overflow-y-auto">
-                            {teamRoles.map(role => (
-                                <div key={role.id} className="flex justify-between items-center p-2 bg-muted/10 rounded border border-border text-sm">
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: role.color }}></div>
-                                        <span>{role.name}</span>
-                                    </div>
-                                    <button onClick={() => deleteRole(role.id)} className="text-muted-foreground hover:text-red-500"><X size={14} /></button>
-                                </div>
-                            ))}
-                            {teamRoles.length === 0 && <div className="text-center text-muted-foreground text-xs py-2">No roles created yet</div>}
-                        </div>
-
-                        <div className="flex justify-end mt-4">
-                            <button type="button" onClick={() => setShowRoleModal(false)} className="px-3 py-1 text-sm hover:underline">Close</button>
-                        </div>
-                    </div>
-                </div>
-            )}
 
         </div>
     );

@@ -395,7 +395,8 @@ router.get('/', authenticateToken, async (req, res) => {
                 },
                 team: {
                     select: { id: true, name: true, slug: true }
-                }
+                },
+                roles: true
             },
             orderBy: { updatedAt: 'desc' }
         });
@@ -684,6 +685,74 @@ router.get('/:id', authenticateToken, async (req, res) => {
     }
 });
 
+// PATCH /projects/:id/roles: Update project roles (tags)
+router.patch('/:id/roles', authenticateToken, async (req, res) => {
+    try {
+        const projectId = parseInt(req.params.id);
+        const { roleIds } = req.body; // Array of role IDs
+
+        if (isNaN(projectId) || !Array.isArray(roleIds)) {
+            return res.status(400).json({ error: 'Invalid input' });
+        }
+
+        const project = await prisma.project.findUnique({
+            where: { id: projectId },
+            include: { team: true }
+        });
+
+        if (!project) return res.status(404).json({ error: 'Project not found' });
+
+        // Check access (must be admin or team member with manage permissions?)
+        // Assuming team members can edit project settings if they have access to team
+        // Or restrict to owner/admin?
+        // Let's stick to standard check: User must be in the team.
+        const user = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            include: {
+                teamMemberships: { where: { teamId: project.teamId } },
+                ownedTeams: { where: { id: project.teamId } }
+            }
+        });
+
+        const isOwner = user.ownedTeams.length > 0;
+        const isMember = user.teamMemberships.length > 0;
+        const isAdmin = user.role === 'admin';
+
+        if (!isOwner && !isMember && !isAdmin) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        // Validate that roles belong to the same team
+        const validRoles = await prisma.teamRole.count({
+            where: {
+                id: { in: roleIds },
+                teamId: project.teamId
+            }
+        });
+
+        if (validRoles !== roleIds.length) {
+            // Some roles might not belong to the team or not exist
+            return res.status(400).json({ error: 'Invalid roles provided' });
+        }
+
+        // Update project roles
+        await prisma.project.update({
+            where: { id: projectId },
+            data: {
+                roles: {
+                    set: roleIds.map(id => ({ id }))
+                }
+            }
+        });
+
+        res.json({ success: true });
+
+    } catch (error) {
+        console.error('Error updating project roles:', error);
+        res.status(500).json({ error: 'Failed to update roles' });
+    }
+});
+
 // POST /projects: Create new project
 router.post('/', authenticateToken, projectRateLimiter, upload.fields([{ name: 'file', maxCount: 1 }, { name: 'images', maxCount: 50 }, { name: 'thumbnail', maxCount: 1 }]), async (req, res) => {
     const videoFile = req.files.file ? req.files.file[0] : null;
@@ -892,13 +961,26 @@ router.post('/', authenticateToken, projectRateLimiter, upload.fields([{ name: '
             thumbnailPath = path.join(teamSlugToUse, slug, thumbName).replace(/\\/g, '/');
         }
 
+        // Parse roleIds if present
+        let roleIdsParsed = [];
+        if (req.body.roleIds) {
+            try {
+                roleIdsParsed = JSON.parse(req.body.roleIds);
+            } catch (e) {
+                console.warn('Failed to parse roleIds', e);
+            }
+        }
+
         let projectData = {
             name: name || 'Untitled Project',
             description: description || '',
             teamId: parsedTeamId,
             thumbnailPath,
             hasCustomThumbnail,
-            slug
+            slug,
+            roles: roleIdsParsed.length > 0 ? {
+                connect: roleIdsParsed.map(id => ({ id: parseInt(id) }))
+            } : undefined
         };
 
         if (videoFile) {
@@ -1429,6 +1511,7 @@ router.post('/', authenticateToken, projectRateLimiter, upload.fields([{ name: '
                 console.log('[Discord] Triggering notification for project:', project.id, 'with GIF:', generatedGifPath);
                 await notifyDiscord(parsedTeamId, 'PROJECT_CREATE', {
                     id: project.id,
+                    projectId: project.id, // Explicitly pass ProjectID for role filtering
                     name: project.name,
                     description: project.description,
                     thumbnailPath: project.thumbnailPath,
@@ -1978,6 +2061,7 @@ router.post('/:id/versions', authenticateToken, versionRateLimiter, upload.field
 
             // Discord Notification
             await notifyDiscord(project.teamId, 'VIDEO_VERSION', {
+                projectId: projectId, // Explicitly pass ProjectID for role filtering
                 projectName: project.name,
                 projectSlug: project.slug,
                 versionName: versionName,
@@ -2191,7 +2275,7 @@ router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUploa
         if (project && project.teamId) {
             const team = await prisma.team.findUnique({
                 where: { id: project.teamId },
-                include: { members: { select: { id: true } }, owner: { select: { id: true } } }
+                include: { members: { select: { userId: true } }, owner: { select: { id: true } } }
             });
 
             const recipients = new Set();
@@ -2199,7 +2283,7 @@ router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUploa
                 // Add owner
                 recipients.add(team.ownerId);
                 // Add members
-                team.members.forEach(m => recipients.add(m.id));
+                team.members.forEach(m => recipients.add(m.userId));
             }
 
             // Live Comment Update (to everyone in team, including muted, excluding author maybe? or include author for sync)
@@ -2233,7 +2317,10 @@ router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUploa
             }
 
             // Discord Notification
-            await notifyDiscord(project.teamId, 'COMMENT', {
+            // Determine if this is a MENTION or just a COMMENT to avoid duplicates
+            // If mentions exist, treat as MENTION (Instant in Hybrid). The service handles routing.
+            const hasMentions = content && content.includes('@');
+            await notifyDiscord(project.teamId, hasMentions ? 'MENTION' : 'COMMENT', {
                 ...comment,
                 projectId: project.id, // Explicitly pass ProjectID for GIF generation
                 cameraState: comment.cameraState, // Ensure camera state is passed
@@ -2243,16 +2330,18 @@ router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUploa
             });
         }
 
-        // Handle Mentions
+        // Handle Mentions (Internal Only)
         if (project && project.teamId && content && content.includes('@')) {
             const matches = content.match(/@([\w_\-]+)/g);
             if (matches) {
                 const mentions = matches.map(m => m.substring(1).replace(/_/g, ' '));
 
+                // ... (User/Role fetching remains same) ...
+
                 const mentionedUsers = await prisma.user.findMany({
                     where: {
                         OR: [
-                            { teams: { some: { id: project.teamId } } },
+                            { teamMemberships: { some: { teamId: project.teamId } } },
                             { ownedTeams: { some: { id: project.teamId } } }
                         ],
                         name: { in: mentions }
@@ -2275,9 +2364,7 @@ router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUploa
 
                 // Remove author
                 userIdsToNotify.delete(req.user.id);
-                // Muted users SHOULD still get Mentions (usually high priority), but maybe not general comments?
-                // Standard practice: Mentions override Mute.
-                // So we do NOT filter by mutedUserIds here.
+                // Muted users SHOULD still get Mentions
 
                 await createAndBroadcast(Array.from(userIdsToNotify), {
                     type: 'MENTION',
@@ -2294,13 +2381,7 @@ router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUploa
                     }
                 });
 
-                // Discord Notification (For Mentions - usually Immediate in Hybrid)
-                await notifyDiscord(project.teamId, 'MENTION', {
-                    ...comment,
-                    projectName: project.name,
-                    projectSlug: project.slug,
-                    user: { name: comment.user?.name || 'User', avatarPath: comment.user?.avatarPath }
-                });
+                // Removed duplicate notifyDiscord('MENTION') call here
             }
         }
 
