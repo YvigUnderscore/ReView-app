@@ -96,7 +96,7 @@ router.post('/setup', async (req, res) => {
     });
 
     // Auto-login after setup
-    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
+    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
     res.json({ token, user: { id: user.id, email: user.email, role: user.role, name: user.name, preferences: user.preferences, teams: [] } });
 
   } catch (error) {
@@ -162,7 +162,7 @@ router.post('/register', registerLimiter, async (req, res) => {
       return newUser;
     });
 
-    const jwtToken = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
+    const jwtToken = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
     res.json({ token: jwtToken, user: { id: user.id, email: user.email, role: user.role, name: user.name, preferences: user.preferences, teams: [] } });
 
   } catch (error) {
@@ -218,7 +218,7 @@ router.post('/login', loginLimiter, async (req, res) => {
       uniqueTeams = Array.from(new Map(allTeams.map(t => [t.id, t])).values());
     }
 
-    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
+    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
     res.json({
       token,
       user: {
