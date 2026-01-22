@@ -1511,6 +1511,7 @@ router.post('/', authenticateToken, projectRateLimiter, upload.fields([{ name: '
                 console.log('[Discord] Triggering notification for project:', project.id, 'with GIF:', generatedGifPath);
                 await notifyDiscord(parsedTeamId, 'PROJECT_CREATE', {
                     id: project.id,
+                    projectId: project.id, // Explicitly pass ProjectID for role filtering
                     name: project.name,
                     description: project.description,
                     thumbnailPath: project.thumbnailPath,
@@ -2315,7 +2316,10 @@ router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUploa
             }
 
             // Discord Notification
-            await notifyDiscord(project.teamId, 'COMMENT', {
+            // Determine if this is a MENTION or just a COMMENT to avoid duplicates
+            // If mentions exist, treat as MENTION (Instant in Hybrid). The service handles routing.
+            const hasMentions = content && content.includes('@');
+            await notifyDiscord(project.teamId, hasMentions ? 'MENTION' : 'COMMENT', {
                 ...comment,
                 projectId: project.id, // Explicitly pass ProjectID for GIF generation
                 cameraState: comment.cameraState, // Ensure camera state is passed
@@ -2325,16 +2329,18 @@ router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUploa
             });
         }
 
-        // Handle Mentions
+        // Handle Mentions (Internal Only)
         if (project && project.teamId && content && content.includes('@')) {
             const matches = content.match(/@([\w_\-]+)/g);
             if (matches) {
                 const mentions = matches.map(m => m.substring(1).replace(/_/g, ' '));
 
+                // ... (User/Role fetching remains same) ...
+
                 const mentionedUsers = await prisma.user.findMany({
                     where: {
                         OR: [
-                            { teams: { some: { id: project.teamId } } },
+                            { teamMemberships: { some: { teamId: project.teamId } } },
                             { ownedTeams: { some: { id: project.teamId } } }
                         ],
                         name: { in: mentions }
@@ -2357,9 +2363,7 @@ router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUploa
 
                 // Remove author
                 userIdsToNotify.delete(req.user.id);
-                // Muted users SHOULD still get Mentions (usually high priority), but maybe not general comments?
-                // Standard practice: Mentions override Mute.
-                // So we do NOT filter by mutedUserIds here.
+                // Muted users SHOULD still get Mentions
 
                 await createAndBroadcast(Array.from(userIdsToNotify), {
                     type: 'MENTION',
@@ -2376,13 +2380,7 @@ router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUploa
                     }
                 });
 
-                // Discord Notification (For Mentions - usually Immediate in Hybrid)
-                await notifyDiscord(project.teamId, 'MENTION', {
-                    ...comment,
-                    projectName: project.name,
-                    projectSlug: project.slug,
-                    user: { name: comment.user?.name || 'User', avatarPath: comment.user?.avatarPath }
-                });
+                // Removed duplicate notifyDiscord('MENTION') call here
             }
         }
 

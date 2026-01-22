@@ -187,9 +187,9 @@ async function getChannelsToNotify(team, data, options) {
 
     // Mention-based filtering (Bypass Logic)
     let mentionedRoleIds = [];
-    if (data.content && team.roles) {
+    if (data && data.content && team && Array.isArray(team.roles)) {
         team.roles.forEach(role => {
-            if (data.content.includes(`@${role.name}`)) {
+            if (role && role.name && data.content.includes(`@${role.name}`)) {
                 mentionedRoleIds.push(role.id);
             }
         });
