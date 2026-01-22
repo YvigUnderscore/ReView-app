@@ -9,7 +9,7 @@ const prisma = new PrismaClient();
 
 // GET /api/users/search: Search for users by name or email
 router.get('/search', authenticateToken, async (req, res) => {
-    const { q } = req.query;
+    const { q, context } = req.query;
 
     // Security: Strip wildcards to prevent injection
     const safeQ = (q || '').replace(/[%_]/g, '').trim();
@@ -21,13 +21,36 @@ router.get('/search', authenticateToken, async (req, res) => {
     try {
         const whereClause = {
             OR: [
-                { name: { contains: safeQ } },
-                { email: { contains: safeQ } }
+                { name: { contains: safeQ, mode: 'insensitive' } },
+                { email: { contains: safeQ, mode: 'insensitive' } }
             ]
         };
 
-        // Security: Scope search to mutual team members (unless Admin)
-        if (req.user.role !== 'admin') {
+        // If context is 'addMember', check if user is Owner/Admin of any team
+        // If so, allow searching all users (to add new members to their team)
+        let canSearchAllUsers = req.user.role === 'admin';
+
+        if (!canSearchAllUsers && context === 'addMember') {
+            // Check if user is Owner or Admin of any team
+            const userTeamRoles = await prisma.teamMember.findMany({
+                where: {
+                    userId: req.user.id,
+                    role: { in: ['OWNER', 'ADMIN'] }
+                },
+                select: { teamId: true }
+            });
+
+            // Also check if user owns any team
+            const ownedTeams = await prisma.team.findMany({
+                where: { ownerId: req.user.id },
+                select: { id: true }
+            });
+
+            canSearchAllUsers = userTeamRoles.length > 0 || ownedTeams.length > 0;
+        }
+
+        // If user cannot search all users, restrict to mutual team members
+        if (!canSearchAllUsers) {
             const currentUser = await prisma.user.findUnique({
                 where: { id: req.user.id },
                 select: {
@@ -35,7 +58,7 @@ router.get('/search', authenticateToken, async (req, res) => {
                 }
             });
 
-            if (currentUser && currentUser.teamMemberships) {
+            if (currentUser && currentUser.teamMemberships && currentUser.teamMemberships.length > 0) {
                 const myTeamIds = currentUser.teamMemberships.map(tm => tm.teamId);
                 whereClause.teamMemberships = {
                     some: {
