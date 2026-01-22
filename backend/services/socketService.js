@@ -1,6 +1,7 @@
 const socketIo = require('socket.io');
 const jwt = require('jsonwebtoken');
 const { JWT_SECRET } = require('../middleware');
+const { checkProjectAccess } = require('../utils/authCheck');
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
@@ -68,7 +69,7 @@ const init = (server) => {
     });
 
     // Handle joining project room
-    socket.on('join_project', (projectId) => {
+    socket.on('join_project', async (projectId) => {
         if (projectId) {
             // Check access?
             // If normal user, assume they have access (checked by frontend/api usually, but socket ideally should check too)
@@ -80,8 +81,15 @@ const init = (server) => {
                     socket.join(`project_${projectId}`);
                 }
             } else {
-                // Regular user
-                socket.join(`project_${projectId}`);
+                // Regular user: Verify Access
+                try {
+                    const access = await checkProjectAccess(socket.user.id, projectId);
+                    if (access.authorized) {
+                        socket.join(`project_${projectId}`);
+                    }
+                } catch (e) {
+                    console.error("Socket join error:", e);
+                }
             }
         }
     });
