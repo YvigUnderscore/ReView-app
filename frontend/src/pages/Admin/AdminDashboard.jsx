@@ -67,6 +67,11 @@ const AdminDashboard = () => {
     const [inviteLink, setInviteLink] = useState('');
     const [inviteLoading, setInviteLoading] = useState(false);
 
+    // Bulk Invite State
+    const [bulkEmails, setBulkEmails] = useState('');
+    const [bulkResults, setBulkResults] = useState('');
+    const [bulkLoading, setBulkLoading] = useState(false);
+
     // Modals State
     const [editingUser, setEditingUser] = useState(null);
     const [editingTeam, setEditingTeam] = useState(null);
@@ -402,6 +407,52 @@ const AdminDashboard = () => {
             setInviteLink(link);
         } catch (err) { toast.error('Failed to generate invite'); }
         finally { setInviteLoading(false); }
+    };
+
+    const handleBulkInvite = async (e) => {
+        e.preventDefault();
+        setBulkLoading(true);
+        setBulkResults('');
+
+        try {
+            // Parse emails from textarea (one per line or comma-separated)
+            const emailList = bulkEmails
+                .split(/[\n,]/)
+                .map(e => e.trim())
+                .filter(e => e.length > 0 && e.includes('@'));
+
+            if (emailList.length === 0) {
+                toast.error('No valid emails found');
+                setBulkLoading(false);
+                return;
+            }
+
+            const res = await fetch('/api/invites/bulk', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+                body: JSON.stringify({ emails: emailList })
+            });
+
+            const data = await res.json();
+
+            if (!res.ok) {
+                toast.error(data.error || 'Failed to generate bulk invites');
+                setBulkLoading(false);
+                return;
+            }
+
+            // Format results as requested
+            const formattedResults = data.invites.map(inv =>
+                `${inv.email}\n${window.location.origin}/register?token=${inv.token}\n--------------------`
+            ).join('\n');
+
+            setBulkResults(formattedResults);
+            toast.success(`Generated ${data.count} invite links`);
+        } catch (err) {
+            toast.error('Failed to generate bulk invites');
+        } finally {
+            setBulkLoading(false);
+        }
     };
 
     const handleSaveAnnouncement = async (e) => {
@@ -938,6 +989,48 @@ const AdminDashboard = () => {
                                         <div className="font-mono text-sm break-all select-all bg-background p-2 rounded border border-border">{inviteLink}</div>
                                     </div>
                                 )}
+
+                                {/* Bulk Invite Section */}
+                                <div className="mt-8 pt-6 border-t border-border">
+                                    <h3 className="text-lg font-semibold mb-3 text-purple-600 dark:text-purple-400">Bulk Invites</h3>
+                                    <form onSubmit={handleBulkInvite} className="space-y-4">
+                                        <div>
+                                            <label className="block text-sm font-medium mb-1 text-muted-foreground">
+                                                Paste emails (one per line or comma-separated)
+                                            </label>
+                                            <textarea
+                                                className="w-full bg-background border border-border rounded p-2 h-32 font-mono text-sm"
+                                                placeholder="example1@mail.com&#10;example2@mail.com&#10;example3@mail.com"
+                                                value={bulkEmails}
+                                                onChange={e => setBulkEmails(e.target.value)}
+                                            />
+                                        </div>
+                                        <button
+                                            type="submit"
+                                            disabled={bulkLoading || !bulkEmails.trim()}
+                                            className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white py-2 rounded font-medium transition-colors"
+                                        >
+                                            {bulkLoading ? 'Generating...' : 'Generate Bulk Invites'}
+                                        </button>
+                                    </form>
+                                    {bulkResults && (
+                                        <div className="mt-4 p-4 bg-purple-50 dark:bg-purple-900/20 rounded border border-purple-200 dark:border-purple-800">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <div className="text-xs font-medium text-purple-600 dark:text-purple-400">Generated Invite Links:</div>
+                                                <button
+                                                    onClick={() => {
+                                                        navigator.clipboard.writeText(bulkResults);
+                                                        toast.success('Copied to clipboard');
+                                                    }}
+                                                    className="text-xs bg-purple-600 hover:bg-purple-700 text-white px-2 py-1 rounded"
+                                                >
+                                                    Copy All
+                                                </button>
+                                            </div>
+                                            <pre className="font-mono text-xs whitespace-pre-wrap break-all select-all bg-background p-3 rounded border border-border max-h-60 overflow-y-auto">{bulkResults}</pre>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
 
                             {/* Global Announcement Setting */}
