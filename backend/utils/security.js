@@ -9,7 +9,7 @@ const xss = require('xss');
  * @returns {string}
  */
 const sanitizeHtml = (html) => {
-    if (!html) return html;
+    if (!html) return '';
     // Default xss options are generally safe (strips scripts, iframes, on* events)
     return xss(html);
 };
