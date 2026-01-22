@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { X, Upload, FileVideo, AlertCircle, Image as ImageIcon, Box, Loader2 } from 'lucide-react';
+import { X, Upload, FileVideo, AlertCircle, Image as ImageIcon, Box, Loader2, Check } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -31,6 +31,31 @@ const CreateProjectModal = ({ onClose, onProjectCreated, initialFile }) => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [estimatedTime, setEstimatedTime] = useState(null);
   const [uploadStatusMessage, setUploadStatusMessage] = useState('');
+
+  // Roles Logic
+  const [teamRoles, setTeamRoles] = useState([]);
+  const [selectedRoleIds, setSelectedRoleIds] = useState([]);
+
+  // Fetch roles when team changes
+  React.useEffect(() => {
+    if (selectedTeamId) {
+      fetch(`/api/teams/${selectedTeamId}/roles`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (Array.isArray(data)) setTeamRoles(data);
+          else setTeamRoles([]);
+        })
+        .catch(console.error);
+    } else {
+      setTeamRoles([]);
+    }
+  }, [selectedTeamId]);
+
+  const toggleRole = (roleId) => {
+    setSelectedRoleIds(prev => prev.includes(roleId) ? prev.filter(id => id !== roleId) : [...prev, roleId]);
+  };
 
   // Socket Listener for Status
   React.useEffect(() => {
@@ -164,6 +189,10 @@ const CreateProjectModal = ({ onClose, onProjectCreated, initialFile }) => {
       formData.append('entryFile', selectedEntryFile);
     }
 
+    if (selectedRoleIds.length > 0) {
+      formData.append('roleIds', JSON.stringify(selectedRoleIds));
+    }
+
     const startTime = Date.now();
 
     try {
@@ -288,6 +317,31 @@ const CreateProjectModal = ({ onClose, onProjectCreated, initialFile }) => {
               className="w-full bg-input border border-border rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-shadow min-h-[80px]"
             />
           </div>
+
+          {/* Project Roles */}
+          {teamRoles.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium mb-1.5">Project Roles</label>
+              <div className="flex flex-wrap gap-2">
+                {teamRoles.map(role => {
+                  const isSelected = selectedRoleIds.includes(role.id);
+                  return (
+                    <button
+                      key={role.id}
+                      type="button"
+                      onClick={() => toggleRole(role.id)}
+                      className={`px-3 py-1.5 rounded-full text-xs border transition-all flex items-center gap-2 ${isSelected ? 'border-transparent text-white' : 'border-border bg-background hover:border-primary/50'}`}
+                      style={isSelected ? { backgroundColor: role.color } : {}}
+                    >
+                      {role.name}
+                      {isSelected && <Check size={12} />}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-1">Select roles to route notifications to specific channels.</p>
+            </div>
+          )}
 
           {/* Project Type Selection */}
           <div className="flex gap-2 mb-4">

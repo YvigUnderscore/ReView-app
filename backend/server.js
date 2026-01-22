@@ -29,6 +29,7 @@ const adminRoutes = require('./admin.routes');
 const clientRoutes = require('./client.routes');
 const settingsRoutes = require('./settings.routes');
 const roleRoutes = require('./role.routes');
+const discordChannelRoutes = require('./discordChannel.routes');
 const notificationRoutes = require('./notification.routes');
 const userRoutes = require('./user.routes');
 
@@ -74,10 +75,10 @@ app.use('/api/thumbnails', express.static(path.join(DATA_PATH, 'thumbnails')));
 app.use('/api/media/avatars', express.static(path.join(DATA_PATH, 'avatars')));
 app.use('/api/media/system', express.static(path.join(DATA_PATH, 'system')));
 
-// Global API Rate Limit: 300 requests per 15 minutes
+// Global API Rate Limit: 5000 requests per 15 minutes
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 300,
+  max: 5000,
   message: { error: 'Too many requests from this IP, please try again later.' }
 });
 
@@ -90,6 +91,7 @@ app.use('/api/projects', projectRoutes);
 app.use('/api/invites', inviteRoutes);
 app.use('/api/teams', teamRoutes);
 app.use('/api/teams/:teamId/roles', roleRoutes);
+app.use('/api/teams/:teamId/discord-channels', discordChannelRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/admin', adminRoutes);

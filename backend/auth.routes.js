@@ -105,10 +105,10 @@ router.post('/setup', async (req, res) => {
   }
 });
 
-// Rate limit: 5 attempts per hour per IP (Prevent brute force/spam)
+// Rate limit: 50 attempts per hour per IP (Prevent brute force/spam)
 const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 5,
+  max: 50,
   message: { error: 'Too many registration attempts, please try again later.' }
 });
 
@@ -172,10 +172,10 @@ router.post('/register', registerLimiter, async (req, res) => {
 });
 
 // POST /auth/login
-// Rate limit: 10 attempts per 15 minutes
+// Rate limit: 100 attempts per 15 minutes
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: 100,
   message: { error: 'Too many login attempts, please try again later.' }
 });
 
@@ -400,10 +400,10 @@ const getEmailService = () => {
   return sendEmail;
 };
 
-// Rate limit: 3 attempts per hour per IP (Prevent abuse)
+// Rate limit: 20 attempts per hour per IP (Prevent abuse)
 const forgotPasswordLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 3,
+  max: 20,
   message: { error: 'Too many password reset requests, please try again later.' }
 });
 
@@ -483,10 +483,10 @@ router.post('/forgot-password', forgotPasswordLimiter, async (req, res) => {
   }
 });
 
-// Rate limit: 5 attempts per 15 minutes
+// Rate limit: 20 attempts per 15 minutes
 const resetPasswordLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: 20,
   message: { error: 'Too many password reset attempts, please try again later.' }
 });
 

@@ -250,7 +250,7 @@ const generateDigestVideo = (digestItems, outputDir) => {
 
         try {
             const page = await browser.newPage();
-            page.on('console', msg => console.log('[Puppeteer]:', msg.text()));
+            // page.on('console', msg => console.log('[Puppeteer]:', msg.text()));
 
             // Dynamic viewport based on admin settings
             await page.setViewport({ width: VIDEO_WIDTH, height: VIDEO_HEIGHT });
@@ -318,9 +318,14 @@ const generateDigestVideo = (digestItems, outputDir) => {
 
                 // Load asset
                 if (item.type === '3d') {
-                    await page.evaluate(async (src) => {
-                        await window.DigestRenderer.load3D(src);
-                    }, assetUrl);
+                    try {
+                        await page.evaluate(async (src) => {
+                            await window.DigestRenderer.load3D(src);
+                        }, assetUrl);
+                    } catch (err) {
+                        console.error(`[Digest Video] Failed to load 3D model: ${assetUrl}`, err);
+                        continue;
+                    }
 
                     // Wait for model to load
                     await page.waitForFunction(() => {
@@ -337,9 +342,14 @@ const generateDigestVideo = (digestItems, outputDir) => {
                     await new Promise(r => setTimeout(r, 1000));
 
                 } else if (item.type === 'video') {
-                    await page.evaluate(async (src) => {
-                        await window.DigestRenderer.loadVideo(src);
-                    }, assetUrl);
+                    try {
+                        await page.evaluate(async (src) => {
+                            await window.DigestRenderer.loadVideo(src);
+                        }, assetUrl);
+                    } catch (err) {
+                        console.error(`[Digest Video] Failed to load video: ${assetUrl}`, err);
+                        continue;
+                    }
 
                     // Intro at 0s
                     await page.evaluate(async () => {
@@ -349,9 +359,15 @@ const generateDigestVideo = (digestItems, outputDir) => {
 
                 } else if (item.type === 'image') {
                     // For images, use first image
-                    await page.evaluate(async (src) => {
-                        await window.DigestRenderer.loadImage(src);
-                    }, assetUrl);
+                    try {
+                        await page.evaluate(async (src) => {
+                            await window.DigestRenderer.loadImage(src);
+                        }, assetUrl);
+                    } catch (err) {
+                        console.error(`[Digest Video] Failed to load image: ${assetUrl}`, err);
+                        // Skip this asset, as we can't render it
+                        continue;
+                    }
                     await new Promise(r => setTimeout(r, 1000)); // Warmup
                 }
 
@@ -699,5 +715,6 @@ const generateDigestVideo = (digestItems, outputDir) => {
 };
 
 module.exports = {
-    generateDigestVideo
+    generateDigestVideo,
+    buildDigestItems
 };

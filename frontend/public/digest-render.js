@@ -23,6 +23,8 @@
         // State
         let currentType = null;
         let isReady = false;
+        let mediaDimensions = { w: 1280, h: 720 }; // Default to container
+
 
         // Resize canvas to match container (1280x720)
         function resizeCanvas() {
@@ -69,8 +71,10 @@
                     avatarImg.style.display = 'none';
                 }
 
-                // Set comment text
-                commentTextEl.textContent = commentText;
+                // Set comment text with mention highlighting
+                // Parse @mentions and wrap them in styled spans
+                const parsedText = commentText.replace(/@(\w+)/g, '<span class="mention">@$1</span>');
+                commentTextEl.innerHTML = parsedText;
 
                 // Show with animation or manual opacity
                 commentOverlay.style.display = 'flex';
@@ -201,6 +205,7 @@
                     viewerVideo.removeEventListener('loadeddata', onLoaded);
                     viewerVideo.removeEventListener('error', onError);
                     showLoading(false);
+                    mediaDimensions = { w: viewerVideo.videoWidth, h: viewerVideo.videoHeight };
                     resolve();
                 };
 
@@ -226,6 +231,7 @@
 
                 viewerImage.onload = () => {
                     showLoading(false);
+                    mediaDimensions = { w: viewerImage.naturalWidth, h: viewerImage.naturalHeight };
                     resolve();
                 };
 
@@ -353,6 +359,30 @@
             const h = canvas.height;
             const currentAspect = w / h;
 
+            // Calculate Media Rect (Letterbox/Pillarbox)
+            let drawX = 0, drawY = 0, drawW = w, drawH = h;
+
+            if (currentType === 'image' || currentType === 'video') {
+                const containerAspect = w / h;
+                const mediaW = mediaDimensions.w || w;
+                const mediaH = mediaDimensions.h || h;
+                const mediaAspect = mediaW / mediaH;
+
+                if (mediaAspect > containerAspect) {
+                    // Letterbox
+                    drawW = w;
+                    drawH = w / mediaAspect;
+                    drawX = 0;
+                    drawY = (h - drawH) / 2;
+                } else {
+                    // Pillarbox
+                    drawH = h;
+                    drawW = h * mediaAspect;
+                    drawY = 0;
+                    drawX = (w - drawW) / 2;
+                }
+            }
+
             // Calculate scale correction based on Aspect Ratio regimes
             let scaleX = 1;
             let scaleY = 1;
@@ -399,6 +429,62 @@
                 let x = sx;
                 let y = sy;
 
+                // Aspect Ratio Handling (Letterbox/Pillarbox correction)
+                // If media exists, we must map 0..1 to the displayed media rect
+                if (currentType === 'image' || currentType === 'video') {
+                    // Container: 1280x720
+                    const containerW = 1280;
+                    const containerH = 720;
+                    const containerAspect = containerW / containerH;
+
+                    const mediaW = mediaDimensions.w || 1280;
+                    const mediaH = mediaDimensions.h || 720;
+                    const mediaAspect = mediaW / mediaH;
+
+                    let drawW, drawH, drawX, drawY;
+
+                    // Calculate "object-fit: contain" rect
+                    if (mediaAspect > containerAspect) {
+                        // Limited by width (Letterbox top/bottom)
+                        drawW = containerW;
+                        drawH = containerW / mediaAspect;
+                        drawX = 0;
+                        drawY = (containerH - drawH) / 2;
+                    } else {
+                        // Limited by height (Pillarbox left/right)
+                        drawH = containerH;
+                        drawW = containerH * mediaAspect;
+                        drawY = 0;
+                        drawX = (containerW - drawW) / 2;
+                    }
+
+                    // Map normalized coordinates (0..1) to Draw Rect
+                    let finalX = drawX + x * drawW;
+                    let finalY = drawY + y * drawH;
+
+                    // Apply Legacy Scale Correction (Optional - reusing existing logic if needed)
+                    // Existing logic applied scaleX/scaleY to 'x' before.
+                    // But if 'sx' is normalized to IMAGE, we don't need 'scaleX' logic designed for canvas adaptation?
+                    // The existing 'scaleX/scaleY' logic seemed to handle "Portrait -> Landscape" transitions for saved annotations.
+                    // If we assume incoming annotations are normalized to the Asset (0..1), we should apply Aspect Correction FIRST
+                    // then map to rect.
+
+                    // Apply Aspect Ratio Correction (legacy logic) relative to Asset Aspect Ratio?
+                    // No, "savedAspect" vs "currentAspect" in existing code refers to Container Aspect?
+                    // Actually, let's keep it simple: Map to Media Rect.
+
+                    // Re-apply existing "Aspect Ratio Correction" logic?
+                    if (scaleX !== 1) x = (x - 0.5) * scaleX + 0.5;
+                    if (scaleY !== 1) y = (y - 0.5) * scaleY + 0.5;
+
+                    // Now map to screen
+                    finalX = drawX + x * drawW;
+                    finalY = drawY + y * drawH;
+
+                    return { x: finalX, y: finalY };
+                }
+
+                // Default 3D / Fallback behavior (Full Canvas)
                 // Apply Aspect Ratio Correction
                 if (scaleX !== 1) x = (x - 0.5) * scaleX + 0.5;
                 if (scaleY !== 1) y = (y - 0.5) * scaleY + 0.5;
@@ -442,50 +528,21 @@
                 if (shape.start && shape.end) {
                     const start = getCoord(shape.start.x, shape.start.y);
                     const end = getCoord(shape.end.x, shape.end.y);
-                    // For primitives we need width/height relative to start
-                    // But simplified logic uses getCoord on x/y
-                    // Let's stick to start/end logic converted to x/y/w/h for consistency with ModelViewer logic structure
-                    // ModelViewer uses shape.x/y/w/h. We need to adapt if we receive start/end.
-                    // However, ModelViewer's drawShape assumes x/y/w/h are pre-calculated or normalized.
-                    // Our data has start/end.
 
-                    // Re-calculating properly for start/end based inputs
-                    // The getCoord handles scaling on POINTs.
-                    // Distance between points also needs scaling if we use w/h.
-                    // Better to use start/end points directly if possible.
-                    // But the ModelViewer code used in reference: `const dims = { w: shape.w * w * scaleX, h: shape.h * h * scaleY };`
+                    // Override p and calculated dims via start/end difference
+                    p.x = start.x;
+                    p.y = start.y;
 
-                    // Let's adapt start/end to p/dims logic:
-                    // We shouldn't use shape.start/end directly if we want to follow ModelViewer structure,
-                    // BUT ModelViewer code I saw used separate logic for start/end wasn't fully visible for primitives?
-                    // Ah, line 1245: `ctx.strokeRect(p.x, p.y, dims.w, dims.h);`
-                    // So it expects x,y,w,h.
-
-                    // If we have start/end, we convert:
-                    // But start/end are normalized.
-                    // So p1 = getCoord(start), p2 = getCoord(end).
-                    // w = p2.x - p1.x, h = p2.y - p1.y.
-                    // This automatically includes scaleX/scaleY application!
-
-                    const p1 = getCoord(shape.start.x, shape.start.y);
-                    const p2 = getCoord(shape.end.x, shape.end.y);
-                    p.x = p1.x; // Override p
-                    p.y = p1.y;
-                    dimW = (p2.x - p1.x) / (w * scaleX); // Reverse scaleX to match "dims.w * w * scaleX" logic?
-                    // No, simpler: just use p1, p2 directly.
-                    // But I must follow the animation logic which uses dims.
-
-                    // HACK: calculate raw pixel dimensions
-                    const pixelW = p2.x - p1.x;
-                    const pixelH = p2.y - p1.y;
-
-                    // Mock dims object that results in pixelW/pixelH when multiplied
-                    // dims.w * w * scaleX = pixelW => dims.w = pixelW / (w * scaleX)
-                    // This seems complicated.
-                    // Let's just USE pixelW/pixelH directly and remove the multiplier in drawing code below.
-                    var directDims = { w: pixelW, h: pixelH };
+                    var directDims = { w: end.x - start.x, h: end.y - start.y };
                 } else {
-                    var directDims = { w: shape.w * w * scaleX, h: shape.h * h * scaleY };
+                    // Standard Rect/Circle defined by x,y,w,h (normalized)
+                    // Must scale w/h by DRAW_RECT sizes, not CANVAS sizes.
+                    // If we are in image/video mode, use drawW/drawH. Otherwise fallback to w/h.
+
+                    const referenceW = (currentType === 'image' || currentType === 'video') ? drawW : w;
+                    const referenceH = (currentType === 'image' || currentType === 'video') ? drawH : h;
+
+                    var directDims = { w: shape.w * referenceW * scaleX, h: shape.h * referenceH * scaleY };
                 }
 
                 const dims = directDims; // Use calculated pixel dimensions
@@ -507,6 +564,15 @@
                         ctx.ellipse(p.x + dims.w / 2, p.y + dims.h / 2, Math.abs(dims.w / 2), Math.abs(dims.h / 2), 0, 0, 2 * Math.PI);
                         ctx.stroke();
                     }
+                } else if (shapeType === 'line') {
+                    const lineProgress = progress;
+                    const tox = p.x + dims.w * lineProgress;
+                    const toy = p.y + dims.h * lineProgress;
+
+                    ctx.beginPath();
+                    ctx.moveTo(p.x, p.y);
+                    ctx.lineTo(tox, toy);
+                    ctx.stroke();
                 } else if (shapeType === 'arrow') {
 
                     const lineProgress = Math.min(progress * 1.2, 1);

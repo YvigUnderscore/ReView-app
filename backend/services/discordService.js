@@ -75,63 +75,182 @@ async function addToQueue(teamId, type, data) {
     });
 }
 
-// 3. Main Notify Function
-async function notifyDiscord(teamId, eventType, data) {
+// 3. Main Notify Function - now supports multiple Discord channels
+async function notifyDiscord(teamId, eventType, data, options = {}) {
     if (!teamId) return;
 
-    const team = await prisma.team.findUnique({ where: { id: teamId } });
-    if (!team || !team.discordWebhookUrl) return;
-
-    const timing = team.discordTiming || 'REALTIME';
-
-    // MAJOR Logic: Only notify major events
-    if (timing === 'MAJOR') {
-        const majorEvents = ['STATUS_CHANGE', 'VIDEO_VERSION', 'PROJECT_CREATE'];
-        if (!majorEvents.includes(eventType)) return;
-        // If major, send immediately
-        await processInstantNotification(team, eventType, data);
-        return;
-    }
-
-    // HYBRID Logic
-    if (timing === 'HYBRID') {
-        const instantEvents = ['MENTION', 'STATUS_CHANGE', 'VIDEO_VERSION', 'PROJECT_CREATE'];
-        if (instantEvents.includes(eventType)) {
-            await processInstantNotification(team, eventType, data);
-        } else {
-            // Queue everything else (Comments)
-            await addToQueue(team.id, eventType, data);
+    const team = await prisma.team.findUnique({
+        where: { id: teamId },
+        include: {
+            roles: true,
+            discordChannels: {
+                include: {
+                    teamRoles: true
+                }
+            }
         }
-        return;
+    });
+    if (!team) return;
+
+    // Get channels to notify
+    const channelsToNotify = await getChannelsToNotify(team, data, options);
+
+    // If no channels and no main webhook, exit
+    if (channelsToNotify.length === 0 && !team.discordWebhookUrl) return;
+
+    // If no custom channels, use main webhook
+    if (channelsToNotify.length === 0 && team.discordWebhookUrl) {
+        channelsToNotify.push({
+            webhookUrl: team.discordWebhookUrl,
+            botName: team.discordBotName,
+            botAvatar: team.discordBotAvatar,
+            timing: team.discordTiming || 'REALTIME',
+            notificationMode: 'VIDEO', // Default for main webhook
+            burnAnnotations: team.discordBurnAnnotations
+        });
     }
 
-    // GROUPED / HOURLY Logic
-    if (timing === 'GROUPED' || timing === 'HOURLY') {
-        await addToQueue(team.id, eventType, data);
-        return;
-    }
+    // Process each channel
+    for (const channel of channelsToNotify) {
+        const timing = channel.timing || team.discordTiming || 'REALTIME';
 
-    // REALTIME (Default)
-    await processInstantNotification(team, eventType, data);
+        // MAJOR Logic: Only notify major events
+        if (timing === 'MAJOR') {
+            const majorEvents = ['STATUS_CHANGE', 'VIDEO_VERSION', 'PROJECT_CREATE'];
+            if (!majorEvents.includes(eventType)) continue;
+            await processInstantNotification(team, channel, eventType, data);
+            continue;
+        }
+
+        // HYBRID Logic
+        if (timing === 'HYBRID') {
+            const instantEvents = ['MENTION', 'STATUS_CHANGE', 'VIDEO_VERSION', 'PROJECT_CREATE'];
+            if (instantEvents.includes(eventType)) {
+                await processInstantNotification(team, channel, eventType, data);
+            } else {
+                // Queue everything else (Comments)
+                await addToQueue(team.id, eventType, { ...data, channelId: channel.id });
+            }
+            continue;
+        }
+
+        // GROUPED / HOURLY Logic
+        if (timing === 'GROUPED' || timing === 'HOURLY') {
+            await addToQueue(team.id, eventType, { ...data, channelId: channel.id });
+            continue;
+        }
+
+        // REALTIME (Default)
+        await processInstantNotification(team, channel, eventType, data);
+    }
 }
 
-// Helper to construct payload and send
-async function processInstantNotification(team, eventType, data) {
+// Get channels to notify based on project/role association
+async function getChannelsToNotify(team, data, options) {
+    const channels = [];
+
+    // If project has explicit channel assignments, use those
+    if (data.projectId) {
+        const projectChannels = await prisma.projectDiscordChannel.findMany({
+            where: { projectId: data.projectId },
+            include: { channel: { include: { teamRoles: true } } }
+        });
+
+        if (projectChannels.length > 0) {
+            for (const pc of projectChannels) {
+                channels.push({
+                    id: pc.channel.id,
+                    webhookUrl: pc.channel.webhookUrl,
+                    botName: pc.channel.botName || team.discordBotName,
+                    botAvatar: pc.channel.botAvatar || team.discordBotAvatar,
+                    timing: pc.channel.timing || team.discordTiming,
+                    notificationMode: pc.channel.notificationMode || 'VIDEO',
+                    burnAnnotations: pc.channel.burnAnnotations ?? team.discordBurnAnnotations
+                });
+            }
+            return channels;
+        }
+    }
+
+    // Role-based filtering
+    let projectRoleIds = [];
+    if (data.projectId) {
+        // Fetch project roles
+        const project = await prisma.project.findUnique({
+            where: { id: data.projectId },
+            include: { roles: true }
+        });
+        if (project && project.roles) {
+            projectRoleIds = project.roles.map(r => r.id);
+        }
+    }
+
+    // Mention-based filtering (Bypass Logic)
+    let mentionedRoleIds = [];
+    if (data && data.content && team && Array.isArray(team.roles)) {
+        team.roles.forEach(role => {
+            if (role && role.name && data.content.includes(`@${role.name}`)) {
+                mentionedRoleIds.push(role.id);
+            }
+        });
+    }
+
+    // Otherwise, check team channels with role filtering
+    for (const channel of team.discordChannels || []) {
+        // If channel has no role filter, it receives all notifications (Global Channel)
+        if (!channel.teamRoles || channel.teamRoles.length === 0) {
+            channels.push({
+                id: channel.id,
+                webhookUrl: channel.webhookUrl,
+                botName: channel.botName || team.discordBotName,
+                botAvatar: channel.botAvatar || team.discordBotAvatar,
+                timing: channel.timing || team.discordTiming,
+                notificationMode: channel.notificationMode || 'VIDEO',
+                burnAnnotations: channel.burnAnnotations ?? team.discordBurnAnnotations
+            });
+            continue;
+        }
+
+        // If channel HAS role filter, check intersection with project roles OR Mentions
+        const channelRoleIds = channel.teamRoles.map(r => r.id);
+
+        const hasProjectRoleMatch = projectRoleIds.length > 0 && projectRoleIds.some(id => channelRoleIds.includes(id));
+        const hasMentionMatch = mentionedRoleIds.length > 0 && mentionedRoleIds.some(id => channelRoleIds.includes(id));
+
+        if (hasProjectRoleMatch || hasMentionMatch) {
+            channels.push({
+                id: channel.id,
+                webhookUrl: channel.webhookUrl,
+                botName: channel.botName || team.discordBotName,
+                botAvatar: channel.botAvatar || team.discordBotAvatar,
+                timing: channel.timing || team.discordTiming,
+                notificationMode: channel.notificationMode || 'VIDEO',
+                burnAnnotations: channel.burnAnnotations ?? team.discordBurnAnnotations
+            });
+        }
+        // If project has NO roles, it does NOT trigger channels that REQUIRE roles.
+    }
+
+    return channels;
+}
+
+// Helper to construct payload and send - now accepts channel config
+async function processInstantNotification(team, channel, eventType, data) {
     const publicUrl = await getPublicUrl();
-    const { content, embed, files } = await constructDiscordMessage(eventType, data, publicUrl, team);
+    const { content, embed, files } = await constructDiscordMessage(eventType, data, publicUrl, team, channel);
 
     await sendToDiscord(
-        team.discordWebhookUrl,
+        channel.webhookUrl,
         { content, embeds: embed ? [embed] : [] },
         files,
-        team.discordBotName,
-        team.discordBotAvatar
+        channel.botName,
+        channel.botAvatar
     );
 }
 
 // Construct Message Payload
-// Construct Message Payload
-async function constructDiscordMessage(eventType, data, publicUrl, team) {
+// channel param added for future Image mode support (Phase A)
+async function constructDiscordMessage(eventType, data, publicUrl, team, channel = null) {
     let content = '';
     const projectLink = data.projectSlug ? `${publicUrl}/#/${team.slug}/project/${data.projectSlug}` : `${publicUrl}/#/${team.slug}/dashboard`;
 
@@ -304,7 +423,8 @@ async function processDebouncedQueue(force = false) {
             discordQueue: { some: {} }
         },
         include: {
-            discordQueue: { orderBy: { createdAt: 'desc' } }
+            discordQueue: { orderBy: { createdAt: 'desc' } },
+            discordChannels: true
         }
     });
 
@@ -333,7 +453,8 @@ async function processHourlyQueue() {
             discordQueue: { some: {} }
         },
         include: {
-            discordQueue: { orderBy: { createdAt: 'desc' } }
+            discordQueue: { orderBy: { createdAt: 'desc' } },
+            discordChannels: true
         }
     });
 
@@ -361,180 +482,212 @@ async function flushQueue(team, queueItems, publicUrl) {
         // Sort oldest first for display
         const items = [...queueItems].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
-        // Group by Project
-        const byProject = {};
+        // Group items by Destination (Main Webhook vs Specific Channel)
+        // Key: 'MAIN' or channelId (int)
+        const groups = {};
+
         items.forEach(item => {
             const data = JSON.parse(item.payload);
-            const pid = data.projectName || 'Unknown Project';
-            if (!byProject[pid]) byProject[pid] = { items: [], id: data.projectId };
-            byProject[pid].items.push({ type: item.type, data });
+            const channelId = data.channelId || 'MAIN';
+
+            if (!groups[channelId]) groups[channelId] = [];
+            groups[channelId].push({ item, data });
         });
 
-        let description = '';
-        const potentialImageFiles = []; // Changed: Store images separately
-        let fileCounter = 0;
-
-        // Track comments for GIF generation
-        let potentialGifComments = [];
-        let bestProjectId = null;
-        let maxComments = 0;
-
-        for (const [projectName, projectData] of Object.entries(byProject)) {
-            console.log(`[Discord Digest] Processing project: ${projectName} (${projectData.items.length} items)`);
-            description += `**${projectName}**\n`;
-
-            let projectComments = [];
-
-            for (const event of projectData.items) {
-                const d = event.data;
-                let line = '';
-                if (event.type === 'COMMENT') {
-                    const author = d.user ? d.user.name : (d.guestName || 'User');
-                    line = `• ${author}: "${d.content.substring(0, 50)}${d.content.length > 50 ? '...' : ''}"`;
-
-                    // Add link
-                    const link = `${publicUrl}/?commentId=${d.id}`;
-                    line += ` [View](${link})\n`;
-
-                    // Collect for GIF
-                    if (d.timestamp != null && d.projectId && !d.parentId) {
-                        console.log(`[Discord Digest] Found timed comment: ID ${d.id}, Time: ${d.timestamp}`);
-                        projectComments.push({ ...d, id: d.id });
-                    }
-
-                    // We typically don't attach ALL images in a digest as it breaks discord limits (10 files max).
-                    // LIMIT: 4 images per flush (if no video)
-                    if (fileCounter < 4 && (d.screenshotPath || d.annotationScreenshotPath)) {
-                        const useBurned = team.discordBurnAnnotations;
-                        let imagePath = null;
-                        if (useBurned && d.annotationScreenshotPath) imagePath = getFilePath(d.annotationScreenshotPath, 'comment');
-                        else if (d.screenshotPath) imagePath = getFilePath(d.screenshotPath, 'comment');
-
-                        if (imagePath && fs.existsSync(imagePath)) {
-                            const fname = `img_${fileCounter}_${path.basename(imagePath)}`;
-                            potentialImageFiles.push({ path: imagePath, name: fname });
-                            fileCounter++;
-                        }
-                    }
-                } else if (event.type === 'STATUS_CHANGE') {
-                    line = `• Status changed to ${d.status}\n`;
-                } else {
-                    line = `• ${event.type}\n`;
-                }
-                description += line;
-            }
-            description += '\n';
-
-            if (projectComments.length > maxComments) {
-                maxComments = projectComments.length;
-                bestProjectId = projectData.id;
-                potentialGifComments = projectComments;
-            }
+        // Determine Webhooks/Settings for logic
+        // We need team channels to map ID -> Webhook
+        const channelsMap = new Map();
+        if (team.discordChannels) {
+            team.discordChannels.forEach(c => channelsMap.set(c.id, c));
         }
 
-        const finalFiles = [];
-        let videoGenerated = false;
+        // Process each group
+        for (const [key, groupItems] of Object.entries(groups)) {
+            let webhookUrl = team.discordWebhookUrl;
+            let botName = team.discordBotName;
+            let botAvatar = team.discordBotAvatar;
 
-        // Generate WebM for the project with most comments
-        if (potentialGifComments.length > 0 && bestProjectId) {
-            console.log(`[Discord Digest] Attempting WebM video generation for Project ${bestProjectId} with ${potentialGifComments.length} comments.`);
-            try {
-                // Fetch the project to get the actual asset path
-                const projectForDigest = await prisma.project.findUnique({
-                    where: { id: bestProjectId },
-                    include: {
-                        videos: { orderBy: { createdAt: 'desc' }, take: 1 },
-                        threeDAssets: { orderBy: { createdAt: 'desc' }, take: 1 },
-                        imageBundles: { orderBy: { createdAt: 'desc' }, take: 1 }
-                    }
-                });
+            let burnAnnotations = team.discordBurnAnnotations;
+            let allowVideo = true;
 
-                let assetPath = '';
-                let assetType = '3d';
-
-                if (projectForDigest) {
-                    if (projectForDigest.threeDAssets && projectForDigest.threeDAssets.length > 0) {
-                        assetPath = projectForDigest.threeDAssets[0].filename;
-                        assetType = '3d';
-                    } else if (projectForDigest.videos && projectForDigest.videos.length > 0) {
-                        assetPath = projectForDigest.videos[0].filename;
-                        assetType = 'video';
-                    } else if (projectForDigest.imageBundles && projectForDigest.imageBundles.length > 0) {
-                        // For image bundles, get first image
-                        const bundle = projectForDigest.imageBundles[0];
-                        const images = await prisma.image.findMany({ where: { bundleId: bundle.id }, take: 1 });
-                        if (images.length > 0) {
-                            assetPath = images[0].filename;
-                            assetType = 'image';
-                        }
-                    }
+            if (key !== 'MAIN') {
+                const cId = parseInt(key);
+                const channel = channelsMap.get(cId);
+                if (!channel) {
+                    console.log(`[Discord Digest] Channel ${cId} not found/deleted, skipping items.`);
+                    continue;
                 }
+                webhookUrl = channel.webhookUrl;
+                botName = channel.botName || botName;
+                botAvatar = channel.botAvatar || botAvatar;
 
-                if (!assetPath) {
-                    console.log('[Discord Digest] No asset found for video generation');
-                } else {
-                    const digestItems = [{
-                        type: assetType,
-                        assetPath: assetPath,
-                        projectId: bestProjectId,
-                        projectName: Object.keys(byProject).find(k => byProject[k].id === bestProjectId) || 'Project',
-                        comments: potentialGifComments.slice(0, 10).map(c => ({
-                            id: c.id,
-                            content: c.content,
-                            timestamp: c.timestamp,
-                            cameraState: c.cameraState ? (typeof c.cameraState === 'string' ? JSON.parse(c.cameraState) : c.cameraState) : null,
-                            annotation: c.annotation ? (typeof c.annotation === 'string' ? JSON.parse(c.annotation) : c.annotation) : null,
-                            user: {
-                                name: c.user?.name || c.guestName || 'Reviewer',
-                                avatarPath: c.user?.avatarPath || null  // Just the path, digestVideoService will add baseUrl
+                if (channel.burnAnnotations !== null) burnAnnotations = channel.burnAnnotations;
+
+                // Check notification Mode
+                if (channel.notificationMode === 'IMAGE') allowVideo = false;
+            }
+
+            if (!webhookUrl) continue;
+
+            // Group by Project WITHIN this channel group
+            const byProject = {};
+            groupItems.forEach(({ item, data }) => {
+                const pid = data.projectName || 'Unknown Project';
+                if (!byProject[pid]) byProject[pid] = { items: [], id: data.projectId };
+                byProject[pid].items.push({ type: item.type, data });
+            });
+
+            // ... Build Digest Description ...
+            let description = '';
+            const potentialImageFiles = [];
+            let fileCounter = 0;
+            let potentialGifComments = [];
+            let bestProjectId = null;
+            let maxComments = 0;
+
+            for (const [projectName, projectData] of Object.entries(byProject)) {
+                // console.log(`[Discord Digest] Processing project: ${projectName} (${projectData.items.length} items) for Target: ${key}`);
+                description += `**${projectName}**\n`;
+
+                let projectComments = [];
+
+                for (const event of projectData.items) {
+                    const d = event.data;
+                    let line = '';
+                    if (event.type === 'COMMENT' || event.type === 'MENTION') {
+                        const author = d.user ? d.user.name : (d.guestName || 'User');
+                        line = `• ${author}: "${d.content.substring(0, 50)}${d.content.length > 50 ? '...' : ''}"`;
+                        const link = `${publicUrl}/?commentId=${d.id}`;
+                        line += ` [View](${link})\n`;
+
+                        if (d.timestamp != null && d.projectId && !d.parentId) {
+                            projectComments.push({ ...d, id: d.id });
+                        }
+
+                        if (fileCounter < 4 && (d.screenshotPath || d.annotationScreenshotPath)) {
+                            // use 'burnAnnotations' derived from channel/team
+                            let imagePath = null;
+                            if (burnAnnotations && d.annotationScreenshotPath) imagePath = getFilePath(d.annotationScreenshotPath, 'comment');
+                            else if (d.screenshotPath) imagePath = getFilePath(d.screenshotPath, 'comment');
+
+                            if (imagePath && fs.existsSync(imagePath)) {
+                                const fname = `img_${fileCounter}_${path.basename(imagePath)}`;
+                                potentialImageFiles.push({ path: imagePath, name: fname });
+                                fileCounter++;
                             }
-                        }))
-                    }];
-
-                    const mediaDir = path.join(DATA_PATH, 'media', 'digests');
-                    if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true });
-
-                    const videoPath = await generateDigestVideo(digestItems, mediaDir);
-                    console.log(`[Discord Digest] Generated WebM at: ${videoPath}`);
-
-                    if (videoPath) {
-                        const fname = path.basename(videoPath);
-                        finalFiles.push({ path: videoPath, name: fname });
-                        videoGenerated = true;
+                        }
+                    } else if (event.type === 'STATUS_CHANGE') {
+                        line = `• Status changed to ${d.status}\n`;
+                    } else {
+                        line = `• ${event.type}\n`;
                     }
+                    description += line;
                 }
-            } catch (e) {
-                console.error('[Discord Digest] Failed to generate digest video', e);
+                description += '\n';
+
+                if (projectComments.length > maxComments) {
+                    maxComments = projectComments.length;
+                    bestProjectId = projectData.id;
+                    potentialGifComments = projectComments;
+                }
             }
-        } else {
-            console.log('[Discord Digest] No timed comments found for video generation.');
+
+            // ... Generate Video/Send ...
+            const finalFiles = [];
+            let videoGenerated = false;
+
+
+            if (allowVideo && potentialGifComments.length > 0 && bestProjectId) {
+                // ... (GIF Logic same as before) ...
+                try {
+                    const projectForDigest = await prisma.project.findUnique({
+                        where: { id: bestProjectId },
+                        include: {
+                            videos: { orderBy: { createdAt: 'desc' }, take: 1 },
+                            threeDAssets: { orderBy: { createdAt: 'desc' }, take: 1 },
+                            imageBundles: { orderBy: { createdAt: 'desc' }, take: 1 }
+                        }
+                    });
+
+                    let assetPath = '';
+                    let assetType = '3d';
+
+                    if (projectForDigest) {
+                        if (projectForDigest.threeDAssets && projectForDigest.threeDAssets.length > 0) {
+                            assetPath = projectForDigest.threeDAssets[0].filename;
+                            assetType = '3d';
+                        } else if (projectForDigest.videos && projectForDigest.videos.length > 0) {
+                            assetPath = projectForDigest.videos[0].filename;
+                            assetType = 'video';
+                        } else if (projectForDigest.imageBundles && projectForDigest.imageBundles.length > 0) {
+                            const bundle = projectForDigest.imageBundles[0];
+                            const images = await prisma.image.findMany({ where: { bundleId: bundle.id }, take: 1 });
+                            if (images.length > 0) {
+                                assetPath = images[0].filename;
+                                assetType = 'image';
+                            }
+                        }
+                    }
+
+                    if (assetPath) {
+                        const digestItems = [{
+                            type: assetType,
+                            assetPath: assetPath,
+                            projectId: bestProjectId,
+                            projectName: Object.keys(byProject).find(k => byProject[k].id === bestProjectId) || 'Project',
+                            comments: potentialGifComments.slice(0, 10).map(c => ({
+                                id: c.id,
+                                content: c.content,
+                                timestamp: c.timestamp,
+                                cameraState: c.cameraState ? (typeof c.cameraState === 'string' ? JSON.parse(c.cameraState) : c.cameraState) : null,
+                                annotation: c.annotation ? (typeof c.annotation === 'string' ? JSON.parse(c.annotation) : c.annotation) : null,
+                                user: {
+                                    name: c.user?.name || c.guestName || 'Reviewer',
+                                    avatarPath: c.user?.avatarPath || null
+                                }
+                            }))
+                        }];
+
+                        const mediaDir = path.join(DATA_PATH, 'media', 'digests');
+                        if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true });
+
+                        const videoPath = await generateDigestVideo(digestItems, mediaDir);
+                        if (videoPath) {
+                            const fname = path.basename(videoPath);
+                            finalFiles.push({ path: videoPath, name: fname });
+                            videoGenerated = true;
+                        }
+                    }
+                } catch (e) {
+                    console.error('[Discord Digest] Failed to generate digest video', e);
+                }
+            }
+
+            if (!videoGenerated) {
+                finalFiles.push(...potentialImageFiles);
+            }
+
+            const embed = {
+                title: `Activity Digest (${groupItems.length} updates)`,
+                description: description,
+                color: 3447003, // Blue
+                timestamp: new Date().toISOString()
+            };
+
+            await sendToDiscord(
+                webhookUrl,
+                { embeds: [embed] },
+                finalFiles,
+                botName,
+                botAvatar
+            );
         }
 
-        // Logic Exclusive: If video generated, DO NOT send images.
-        // Use images only as fallback or if no video.
-        if (!videoGenerated) {
-            finalFiles.push(...potentialImageFiles);
-        }
-
-        const embed = {
-            title: `Activity Digest (${items.length} updates)`,
-            description: description,
-            color: 3447003, // Blue
-            timestamp: new Date().toISOString()
-        };
-
-        await sendToDiscord(
-            team.discordWebhookUrl,
-            { embeds: [embed] },
-            finalFiles, // Use finalFiles instead of files
-            team.discordBotName,
-            team.discordBotAvatar
-        );
-
-        // Delete processed items
+        // Delete ALL processed items (from all groups)
         await prisma.discordQueue.deleteMany({
             where: { id: { in: items.map(i => i.id) } }
         });
+
     } finally {
         // Always release the lock
         processingTeams.delete(team.id);

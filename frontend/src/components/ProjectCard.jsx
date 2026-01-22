@@ -99,6 +99,15 @@ const ProjectCard = ({
                                 {project.team.name}
                             </span>
                         )}
+                        {project.roles && project.roles.length > 0 && (
+                            <div className="flex gap-1">
+                                {project.roles.map(role => (
+                                    <span key={role.id} className="text-[9px] px-1.5 py-0.5 rounded text-white" style={{ backgroundColor: role.color }}>
+                                        {role.name}
+                                    </span>
+                                ))}
+                            </div>
+                        )}
                         {/* Avatar Stack in List View */}
                         {project.team?.members && project.team.members.length > 0 && (
                             <div className="flex -space-x-1.5 items-center">
@@ -214,6 +223,14 @@ const ProjectCard = ({
                                     {project.team.name}
                                 </span>
                             )}
+
+                            {project.roles && project.roles.length > 0 && (
+                                <div className="flex -space-x-1 hover:space-x-1 transition-all">
+                                    {project.roles.map(role => (
+                                        <span key={role.id} className="w-2.5 h-2.5 rounded-full ring-1 ring-card" style={{ backgroundColor: role.color }} title={role.name} />
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -229,7 +246,7 @@ const ProjectCard = ({
                     {isMenuOpen && <MenuDropdown />}
                 </div>
             </div>
-        </div>
+        </div >
     );
 };
 
