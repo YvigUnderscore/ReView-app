@@ -32,7 +32,7 @@ router.get('/search', authenticateToken, async (req, res) => {
 
         if (!canSearchAllUsers && context === 'addMember') {
             // Check if user is Owner or Admin of any team
-            const userTeamRoles = await prisma.teamMember.findMany({
+            const userTeamRoles = await prisma.teamMembership.findMany({
                 where: {
                     userId: req.user.id,
                     role: { in: ['OWNER', 'ADMIN'] }
