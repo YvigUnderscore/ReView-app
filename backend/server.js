@@ -75,10 +75,10 @@ app.use('/api/thumbnails', express.static(path.join(DATA_PATH, 'thumbnails')));
 app.use('/api/media/avatars', express.static(path.join(DATA_PATH, 'avatars')));
 app.use('/api/media/system', express.static(path.join(DATA_PATH, 'system')));
 
-// Global API Rate Limit: 300 requests per 15 minutes
+// Global API Rate Limit: 5000 requests per 15 minutes
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 300,
+  max: 5000,
   message: { error: 'Too many requests from this IP, please try again later.' }
 });
 

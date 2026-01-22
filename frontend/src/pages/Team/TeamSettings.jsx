@@ -180,10 +180,13 @@ const TeamSettings = () => {
 
                 {/* Discord Settings */}
                 <div className="bg-card border border-border rounded-lg p-6">
-                    <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <h3 className="text-lg font-semibold mb-1 flex items-center gap-2">
                         <span className="w-6 h-6 rounded-full bg-[#5865F2] flex items-center justify-center text-white text-xs">D</span>
                         Discord Integration
                     </h3>
+                    <p className="text-sm text-muted-foreground mb-4">
+                        These settings act as the <strong>Default / Fallback</strong> if no specific channel rules (in Team Roles) are matched.
+                    </p>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="md:col-span-2">

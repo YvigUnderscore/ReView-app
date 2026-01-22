@@ -495,23 +495,40 @@ const TeamRoles = () => {
                                             onChange={e => setChannelForm(f => ({ ...f, botName: e.target.value }))}
                                         />
                                     </div>
-                                    <div>
-                                        <label className="block text-sm font-medium mb-1">Notification Mode</label>
-                                        <div className="flex gap-2">
-                                            <button
-                                                type="button"
-                                                onClick={() => setChannelForm(f => ({ ...f, notificationMode: 'VIDEO' }))}
-                                                className={`flex-1 flex items-center justify-center gap-2 py-2 rounded border ${channelForm.notificationMode === 'VIDEO' ? 'bg-primary text-primary-foreground border-primary' : 'border-input hover:bg-muted'}`}
+                                    <div className="md:col-span-2 grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-medium mb-1">Notification Mode</label>
+                                            <div className="flex gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setChannelForm(f => ({ ...f, notificationMode: 'VIDEO' }))}
+                                                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded border ${channelForm.notificationMode === 'VIDEO' ? 'bg-primary text-primary-foreground border-primary' : 'border-input hover:bg-muted'}`}
+                                                >
+                                                    <Video size={14} /> Video
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setChannelForm(f => ({ ...f, notificationMode: 'IMAGE' }))}
+                                                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded border ${channelForm.notificationMode === 'IMAGE' ? 'bg-primary text-primary-foreground border-primary' : 'border-input hover:bg-muted'}`}
+                                                >
+                                                    <ImageIcon size={14} /> Image
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium mb-1">Notification Timing</label>
+                                            <select
+                                                className="w-full bg-background border border-input rounded p-2 text-sm"
+                                                value={channelForm.timing}
+                                                onChange={e => setChannelForm(f => ({ ...f, timing: e.target.value }))}
                                             >
-                                                <Video size={14} /> Video
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => setChannelForm(f => ({ ...f, notificationMode: 'IMAGE' }))}
-                                                className={`flex-1 flex items-center justify-center gap-2 py-2 rounded border ${channelForm.notificationMode === 'IMAGE' ? 'bg-primary text-primary-foreground border-primary' : 'border-input hover:bg-muted'}`}
-                                            >
-                                                <ImageIcon size={14} /> Image
-                                            </button>
+                                                <option value="">Use Team Default</option>
+                                                <option value="REALTIME">Realtime (Immediate)</option>
+                                                <option value="GROUPED">Grouped (Smart Batching)</option>
+                                                <option value="HYBRID">Hybrid (Urgent + Grouped)</option>
+                                                <option value="HOURLY">Hourly Digest</option>
+                                                <option value="MAJOR">Major Events Only</option>
+                                            </select>
                                         </div>
                                     </div>
                                 </div>

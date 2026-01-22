@@ -2061,6 +2061,7 @@ router.post('/:id/versions', authenticateToken, versionRateLimiter, upload.field
 
             // Discord Notification
             await notifyDiscord(project.teamId, 'VIDEO_VERSION', {
+                projectId: projectId, // Explicitly pass ProjectID for role filtering
                 projectName: project.name,
                 projectSlug: project.slug,
                 versionName: versionName,
@@ -2274,7 +2275,7 @@ router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUploa
         if (project && project.teamId) {
             const team = await prisma.team.findUnique({
                 where: { id: project.teamId },
-                include: { members: { select: { id: true } }, owner: { select: { id: true } } }
+                include: { members: { select: { userId: true } }, owner: { select: { id: true } } }
             });
 
             const recipients = new Set();
@@ -2282,7 +2283,7 @@ router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUploa
                 // Add owner
                 recipients.add(team.ownerId);
                 // Add members
-                team.members.forEach(m => recipients.add(m.id));
+                team.members.forEach(m => recipients.add(m.userId));
             }
 
             // Live Comment Update (to everyone in team, including muted, excluding author maybe? or include author for sync)
