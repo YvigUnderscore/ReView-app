@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { PrismaClient } = require('@prisma/client');
 const { generateDigestVideo, buildDigestItems } = require('./digestVideoService');
+const { generateCompositeImage } = require('./digestImageService');
 const prisma = new PrismaClient();
 
 const DATA_PATH = process.env.DATA_PATH || path.join(__dirname, '../storage');
@@ -540,6 +541,7 @@ async function flushQueue(team, queueItems, publicUrl) {
             // ... Build Digest Description ...
             let description = '';
             const potentialImageFiles = [];
+            const potentialCompositeData = []; // For IMAGE mode composite generation
             let fileCounter = 0;
             let potentialGifComments = [];
             let bestProjectId = null;
@@ -573,6 +575,18 @@ async function flushQueue(team, queueItems, publicUrl) {
                             if (imagePath && fs.existsSync(imagePath)) {
                                 const fname = `img_${fileCounter}_${path.basename(imagePath)}`;
                                 potentialImageFiles.push({ path: imagePath, name: fname });
+
+                                // Store data for composite image generation (IMAGE mode)
+                                potentialCompositeData.push({
+                                    screenshotPath: d.screenshotPath ? getFilePath(d.screenshotPath, 'comment') : null,
+                                    annotationScreenshotPath: d.annotationScreenshotPath ? getFilePath(d.annotationScreenshotPath, 'comment') : null,
+                                    userName: d.user?.name || d.guestName || 'Reviewer',
+                                    avatarPath: d.user?.avatarPath || null,
+                                    content: d.content || '',
+                                    attachmentPaths: d.attachmentPaths ? (typeof d.attachmentPaths === 'string' ? JSON.parse(d.attachmentPaths) : d.attachmentPaths) : [],
+                                    burnAnnotations: burnAnnotations
+                                });
+
                                 fileCounter++;
                             }
                         }
@@ -664,7 +678,26 @@ async function flushQueue(team, queueItems, publicUrl) {
             }
 
             if (!videoGenerated) {
-                finalFiles.push(...potentialImageFiles);
+                // Generate composite images for IMAGE mode (with comment panel on right)
+                if (!allowVideo && potentialCompositeData.length > 0) {
+                    const compositeDir = path.join(DATA_PATH, 'media', 'digests');
+                    if (!fs.existsSync(compositeDir)) fs.mkdirSync(compositeDir, { recursive: true });
+
+                    for (const compositeData of potentialCompositeData.slice(0, 4)) {
+                        try {
+                            const compositePath = await generateCompositeImage(compositeData, compositeDir);
+                            if (compositePath) {
+                                const fname = path.basename(compositePath);
+                                finalFiles.push({ path: compositePath, name: fname });
+                            }
+                        } catch (compErr) {
+                            console.error('[Discord Digest] Failed to generate composite image:', compErr);
+                        }
+                    }
+                } else {
+                    // Fallback to raw screenshots if composite generation fails or not in IMAGE mode
+                    finalFiles.push(...potentialImageFiles);
+                }
             }
 
             const embed = {
