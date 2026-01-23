@@ -1,11 +1,24 @@
-require('dotenv').config();
+const path = require('path');
+const fs = require('fs');
+const dotenv = require('dotenv');
+
+// Load environment variables (try backend/.env first, then root .env)
+const backendEnvPath = path.join(__dirname, '.env');
+const rootEnvPath = path.join(__dirname, '..', '.env');
+
+if (fs.existsSync(backendEnvPath)) {
+  dotenv.config({ path: backendEnvPath });
+} else if (fs.existsSync(rootEnvPath)) {
+  dotenv.config({ path: rootEnvPath });
+} else {
+  dotenv.config(); // Fallback
+}
+
 require('./utils/bigint-patch'); // Apply BigInt JSON serialization patch
 const express = require('express');
 console.log('[DEBUG] server.js starting...');
 const cors = require('cors');
 const helmet = require('helmet');
-const path = require('path');
-const fs = require('fs');
 const http = require('http');
 const { init: initSocket, getIo } = require('./services/socketService');
 const { runCleanup } = require('./services/cleanupService');
@@ -58,7 +71,32 @@ app.set('trust proxy', 1); // Trust first proxy (Nginx) for Rate Limiting
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
-app.use(cors());
+
+// CORS Configuration
+const corsOrigin = process.env.CORS_ORIGIN;
+let corsOptions = {};
+
+if (corsOrigin) {
+  // Allow single or comma-separated origins
+  const origins = corsOrigin.split(',').map(o => o.trim());
+  corsOptions = {
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) return callback(null, true);
+      if (origins.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    }
+  };
+  console.log(`[Security] CORS restricted to: ${origins.join(', ')}`);
+} else {
+  console.warn('⚠️  SECURITY WARNING: CORS_ORIGIN is not defined. Allowing ALL origins (*). This is insecure in production.');
+  corsOptions = { origin: '*' };
+}
+
+app.use(cors(corsOptions));
 
 // Limit JSON body size:
 // - Increase limit for project routes (comments with screenshots) and client routes

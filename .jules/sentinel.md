@@ -32,3 +32,8 @@
 **Vulnerability:** Authenticated users could join any project's real-time room by emitting `join_project` with an arbitrary project ID, receiving sensitive updates (comments, versions) without team membership checks.
 **Learning:** Socket.IO events like `join_room` are not protected by standard HTTP middleware; explicit authorization checks must be performed within the socket event handler.
 **Prevention:** Always verify ownership/membership using shared auth utilities (e.g., `checkProjectAccess`) inside socket event handlers before joining sensitive rooms.
+
+## 2026-05-25 - Overly Permissive CORS Configuration
+**Vulnerability:** Both Express and Socket.IO were configured to allow Cross-Origin Resource Sharing (CORS) from any origin (`*`) by default. This exposes the API to unauthorized cross-origin requests and potential security risks in production environments where strict origin control is expected.
+**Learning:** Relying on default CORS configurations often results in insecure "allow all" policies. Socket.IO requires its own separate CORS configuration, distinct from Express.
+**Prevention:** Explicitly configure CORS to allow only trusted origins defined in environment variables (`CORS_ORIGIN`). Implement a secure-by-default approach where missing configuration defaults to a safe state or emits a clear warning.

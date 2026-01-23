@@ -8,9 +8,16 @@ const prisma = new PrismaClient();
 let io;
 
 const init = (server) => {
+  const corsOrigin = process.env.CORS_ORIGIN;
+  let origin = '*';
+
+  if (corsOrigin) {
+    origin = corsOrigin.split(',').map(o => o.trim());
+  }
+
   io = socketIo(server, {
     cors: {
-      origin: '*', // Allow all for now, or match frontend config
+      origin: origin,
       methods: ['GET', 'POST']
     }
   });
