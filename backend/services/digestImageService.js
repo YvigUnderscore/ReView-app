@@ -379,10 +379,16 @@ const generateCompositeImage = (commentData, outputDir) => {
                 .toUpperCase();
 
             // Load attachment thumbnails
+            // Note: Comment attachments are stored in DATA_PATH/media (via multer)
             const attachmentDataUrls = [];
             if (attachmentPaths && Array.isArray(attachmentPaths)) {
                 for (const attPath of attachmentPaths.slice(0, 4)) { // Max 4 attachments shown
-                    const fullPath = path.join(DATA_PATH, 'comments', attPath);
+                    // Try media folder first (where multer stores them)
+                    let fullPath = path.join(DATA_PATH, 'media', attPath);
+                    if (!fs.existsSync(fullPath)) {
+                        // Fallback to comments folder
+                        fullPath = path.join(DATA_PATH, 'comments', attPath);
+                    }
                     if (fs.existsSync(fullPath)) {
                         const dataUrl = fileToDataUrl(fullPath);
                         if (dataUrl) attachmentDataUrls.push(dataUrl);
