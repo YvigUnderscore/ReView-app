@@ -3,8 +3,12 @@ import React, { useRef, useEffect, useState, useCallback, useImperativeHandle, f
 import { X, ArrowLeft, ArrowRight } from 'lucide-react';
 import { isPointInShape, moveShape } from '../utils/annotationUtils';
 import DrawingToolbar from './DrawingToolbar';
+import { useAuth } from '../context/AuthContext';
 
-const ImageViewer = forwardRef(({ src, onNext, onPrev, hasPrev, hasNext, annotations, onAnnotationSave, viewingAnnotation, viewingCommentId, isDrawingModeTrigger, isReadOnly, activeImageIndex, totalImages, onImageChange, onReviewSubmit, onDrawingModeChange }, ref) => {
+const ImageViewer = forwardRef(({ src: rawSrc, onNext, onPrev, hasPrev, hasNext, annotations, onAnnotationSave, viewingAnnotation, viewingCommentId, isDrawingModeTrigger, isReadOnly, activeImageIndex, totalImages, onImageChange, onReviewSubmit, onDrawingModeChange }, ref) => {
+    const { getMediaUrl } = useAuth();
+    const src = getMediaUrl(rawSrc);
+
     const containerRef = useRef(null);
     const canvasRef = useRef(null);
     const imageRef = useRef(null);

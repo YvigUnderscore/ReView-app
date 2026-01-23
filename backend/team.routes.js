@@ -2,6 +2,7 @@ const express = require('express');
 const { PrismaClient } = require('@prisma/client');
 const { authenticateToken } = require('./middleware');
 const { isValidText } = require('./utils/validation');
+const { sanitizeHtml } = require('./utils/security');
 const fs = require('fs');
 const { createAndBroadcast } = require('./services/notificationService');
 
@@ -157,7 +158,7 @@ router.post('/', authenticateToken, async (req, res) => {
         const team = await prisma.$transaction(async (prisma) => {
             const newTeam = await prisma.team.create({
                 data: {
-                    name,
+                    name: sanitizeHtml(name),
                     slug,
                     owner: { connect: { id: req.user.id } },
                     members: {
@@ -212,7 +213,7 @@ router.patch('/:id', authenticateToken, async (req, res) => {
         const data = {};
         if (name !== undefined) {
             if (!isValidText(name, 100)) return res.status(400).json({ error: 'Team name exceeds 100 characters' });
-            data.name = name;
+            data.name = sanitizeHtml(name);
         }
         if (startFrame !== undefined) {
             const parsedFrame = parseInt(startFrame);

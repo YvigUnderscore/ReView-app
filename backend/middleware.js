@@ -4,25 +4,42 @@ let JWT_SECRET = process.env.JWT_SECRET;
 let isDefaultSecret = false;
 
 if (!JWT_SECRET) {
-    if (process.env.NODE_ENV === 'production') {
-        throw new Error('FATAL: JWT_SECRET environment variable is not defined. The server refuses to start in production with an insecure configuration.');
-    }
-    console.warn('WARNING: JWT_SECRET environment variable is not defined. Using default insecure secret.');
-    JWT_SECRET = 'CHANGE_ME_IN_PROD_PLEASE';
-    isDefaultSecret = true;
+  throw new Error('FATAL: JWT_SECRET environment variable is not defined. Please check your .env file.');
 }
 
 // Middleware to verify JWT
+const { PrismaClient } = require('@prisma/client');
+const prisma = new PrismaClient();
+
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) return res.sendStatus(401);
 
-  jwt.verify(token, JWT_SECRET, (err, user) => {
+  jwt.verify(token, JWT_SECRET, async (err, user) => {
     if (err) return res.sendStatus(403);
-    req.user = user;
-    next();
+
+    // SECURITY FIX: Zombie Token Check
+    // Verify user actually exists in DB and has not been deleted/banned
+    try {
+      const dbUser = await prisma.user.findUnique({
+        where: { id: user.id },
+        select: { id: true, email: true, role: true } // Fetch latest role as well
+      });
+
+      if (!dbUser) {
+        // User deleted or invalid
+        return res.status(401).json({ error: 'User no longer exists' });
+      }
+
+      // Update req.user with latest DB info (in case role changed)
+      req.user = dbUser;
+      next();
+    } catch (dbError) {
+      console.error("Auth Middleware DB Error:", dbError);
+      res.sendStatus(500);
+    }
   });
 };
 

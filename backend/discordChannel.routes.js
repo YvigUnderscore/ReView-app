@@ -1,6 +1,7 @@
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
 const { authenticateToken } = require('./middleware');
+const { isValidDiscordWebhook, sanitizeHtml } = require('./utils/security');
 
 const router = express.Router({ mergeParams: true }); // mergeParams to access :teamId
 const prisma = new PrismaClient();
@@ -70,13 +71,17 @@ router.post('/', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'Name and webhook URL are required' });
         }
 
+        if (!isValidDiscordWebhook(webhookUrl)) {
+            return res.status(400).json({ error: 'Invalid Discord Webhook URL. Must be a valid URL from discord.com or discordapp.com' });
+        }
+
         // Create channel
         const channel = await prisma.discordChannel.create({
             data: {
-                name,
+                name: sanitizeHtml(name),
                 webhookUrl,
                 teamId,
-                botName: botName || null,
+                botName: botName ? sanitizeHtml(botName) : null,
                 botAvatar: botAvatar || null,
                 notificationMode: notificationMode || 'VIDEO',
                 timing: timing || null,
@@ -121,9 +126,14 @@ router.patch('/:id', authenticateToken, async (req, res) => {
 
         // Build update data
         const updateData = {};
-        if (name !== undefined) updateData.name = name;
-        if (webhookUrl !== undefined) updateData.webhookUrl = webhookUrl;
-        if (botName !== undefined) updateData.botName = botName || null;
+        if (name !== undefined) updateData.name = sanitizeHtml(name);
+        if (webhookUrl !== undefined) {
+            if (!isValidDiscordWebhook(webhookUrl)) {
+                return res.status(400).json({ error: 'Invalid Discord Webhook URL. Must be a valid URL from discord.com or discordapp.com' });
+            }
+            updateData.webhookUrl = webhookUrl;
+        }
+        if (botName !== undefined) updateData.botName = botName ? sanitizeHtml(botName) : null;
         if (botAvatar !== undefined) updateData.botAvatar = botAvatar || null;
         if (notificationMode !== undefined) updateData.notificationMode = notificationMode;
         if (timing !== undefined) updateData.timing = timing || null;
@@ -223,8 +233,7 @@ router.post('/:id/test', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Failed to send test message:', error);
         res.status(500).json({
-            error: 'Failed to send test message',
-            details: error.response?.data?.message || error.message
+            error: 'Failed to send test message. Please verify the Webhook URL and try again.'
         });
     }
 });

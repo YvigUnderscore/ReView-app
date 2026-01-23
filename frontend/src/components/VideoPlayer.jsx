@@ -3,6 +3,7 @@ import { Play, Pause, Volume2, Maximize, Check, X, MessageSquare, Spline } from 
 import { isPointInShape, moveShape } from '../utils/annotationUtils';
 import { timeToFrame, frameToTime } from '../utils/timeUtils';
 import DrawingToolbar from './DrawingToolbar';
+import { useAuth } from '../context/AuthContext';
 
 // Helper to format time as MM:SS
 const formatTime = (seconds) => {
@@ -12,7 +13,11 @@ const formatTime = (seconds) => {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 };
 
-const VideoPlayer = forwardRef(({ src, compareSrc, compareAudioEnabled, onTimeUpdate, onDurationChange, onAnnotationSave, viewingAnnotation, viewingCommentId, isDrawingModeTrigger, onUserPlay, isGuest, guestName, isReadOnly, onPlayStateChange, loop, playbackRate, frameRate = 24, onReviewSubmit, onDrawingModeChange }, ref) => {
+const VideoPlayer = forwardRef(({ src: rawSrc, compareSrc: rawCompareSrc, compareAudioEnabled, onTimeUpdate, onDurationChange, onAnnotationSave, viewingAnnotation, viewingCommentId, isDrawingModeTrigger, onUserPlay, isGuest, guestName, isReadOnly, onPlayStateChange, loop, playbackRate, frameRate = 24, onReviewSubmit, onDrawingModeChange }, ref) => {
+    const { getMediaUrl } = useAuth();
+    const src = getMediaUrl(rawSrc);
+    const compareSrc = getMediaUrl(rawCompareSrc);
+
     const videoRef = useRef(null);
     const compareVideoRef = useRef(null);
     const containerRef = useRef(null);

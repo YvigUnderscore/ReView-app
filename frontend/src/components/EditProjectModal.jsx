@@ -1,8 +1,10 @@
 import React, { useState, useRef } from 'react';
 import { X, AlertCircle, Trash2, Image as ImageIcon, Upload, Check } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useAuth } from '../context/AuthContext';
 
 const EditProjectModal = ({ project, onClose, onProjectUpdated, onProjectDeleted }) => {
+    const { getMediaUrl } = useAuth();
     const [activeTab, setActiveTab] = useState('details'); // details, thumbnail, version
     const [name, setName] = useState(project.name);
     const [description, setDescription] = useState(project.description || '');
@@ -287,7 +289,7 @@ const EditProjectModal = ({ project, onClose, onProjectUpdated, onProjectDeleted
                                                     <img src={URL.createObjectURL(thumbnail)} className="w-full h-full object-cover" alt="Preview" />
                                                 ) : (
                                                     project.thumbnailPath ? (
-                                                        <img src={`/api/thumbnails/${project.thumbnailPath}`} className="w-full h-full object-cover" alt="Current" />
+                                                        <img src={getMediaUrl(`/api/thumbnails/${project.thumbnailPath}`)} className="w-full h-full object-cover" alt="Current" />
                                                     ) : (
                                                         <div className="flex items-center justify-center h-full text-xs text-muted-foreground">Default</div>
                                                     )

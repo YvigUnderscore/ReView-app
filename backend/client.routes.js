@@ -203,10 +203,20 @@ router.post('/projects/:token/comments', commentLimiter, commentUpload.fields([
             cleanupFiles();
             return res.status(400).json({ error: 'Each attachment must be under 5MB' });
         }
-        if (!isValidImageFile(attachmentFile.path)) {
+        const attExt = isValidImageFile(attachmentFile.path);
+        if (!attExt) {
             cleanupFiles();
             return res.status(400).json({ error: 'Invalid attachment file format' });
         }
+
+        // Enforce extension
+        const newPath = attachmentFile.path.replace(path.extname(attachmentFile.path), attExt);
+        if (newPath !== attachmentFile.path) {
+            fs.renameSync(attachmentFile.path, newPath);
+            attachmentFile.path = newPath;
+            attachmentFile.filename = path.basename(newPath);
+        }
+
         attachmentPaths.push(attachmentFile.filename);
     }
 
@@ -431,7 +441,7 @@ router.patch('/projects/:token/comments/:commentId', async (req, res) => {
 
         // Build update data
         const updateData = { isEdited: true };
-        if (content !== undefined) updateData.content = content;
+        if (content !== undefined) updateData.content = sanitizeHtml(content);
         if (annotation !== undefined) {
             updateData.annotation = annotation ? (typeof annotation === 'string' ? annotation : JSON.stringify(annotation)) : null;
         }

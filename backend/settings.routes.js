@@ -143,8 +143,9 @@ router.post('/icon', authenticateToken, upload.single('icon'), async (req, res) 
     const allowedMimeTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/x-icon', 'image/svg+xml'];
     if (!allowedMimeTypes.includes(req.file.mimetype)) {
         // Delete the file if it was saved by multer before validation
-        if (req.file.path && fs.existsSync(req.file.path)) {
-            fs.unlinkSync(req.file.path);
+        // Delete the file if it was saved by multer before validation
+        if (req.file.path) {
+            try { await fs.promises.unlink(req.file.path); } catch (e) { }
         }
         return res.status(400).json({ error: 'Invalid file type. Only images are allowed.' });
     }
@@ -173,8 +174,8 @@ router.post('/sound', authenticateToken, upload.single('sound'), async (req, res
     // audio/mpeg is standard for MP3.
     const allowedMimeTypes = ['audio/mpeg', 'audio/mp3'];
     if (!allowedMimeTypes.includes(req.file.mimetype)) {
-        if (req.file.path && fs.existsSync(req.file.path)) {
-            fs.unlinkSync(req.file.path);
+        if (req.file.path) {
+            try { await fs.promises.unlink(req.file.path); } catch (e) { }
         }
         return res.status(400).json({ error: 'Invalid file type. Only MP3 allowed.' });
     }
@@ -217,7 +218,10 @@ router.get('/smtp', authenticateToken, async (req, res) => {
 
         const config = {};
         keys.forEach(k => config[k] = ''); // Default
-        settings.forEach(s => config[s.key] = s.value);
+        settings.forEach(s => {
+            if (s.key === 'smtp_pass') config[s.key] = s.value ? '********' : '';
+            else config[s.key] = s.value;
+        });
 
         res.json(config);
     } catch (e) {
