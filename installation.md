@@ -5,9 +5,11 @@
 
 ## Environment Variables
 The application requires the following environment variables to be set (e.g., in a `.env` file):
-- ⚠️⚠️`JWT_SECRET`: A strong, random string used to sign authentication tokens. **Required.**⚠️⚠️
-- `DATA_PATH`: Path to store application data (defaults to internal storage).
-- `PORT`: If needed you can change the default value (3429) of your instance.
+- **⚠️⚠️`JWT_SECRET`**: A strong, random string used to sign authentication tokens. **Required.**⚠️⚠️
+- **`DATA_PATH`**: Path to store application data (defaults to internal storage).
+### Optionnal variables:
+- **`PORT`**: If needed you can change the default front-end value (**3429**) of your instance.
+- **`BPORT`**: If needed you can change the default front-end value (**3430**) of your instance.
 ## Quick Start
 
 1. **Clone the repository:**
@@ -15,17 +17,16 @@ The application requires the following environment variables to be set (e.g., in
    git clone https://github.com/YvigUnderscore/ReView-app.git
    cd ReView-app
    ```
-2. **Update your JWT_Secret variable in .env**
+2. **Create and add to your .env file your JWT_Secret & DATA_PATH variables**
    ```bash
    JWT_SECRET=
+   DATA_PATH=
    ```
 
 3. **Start the application:**
    ```bash
    docker-compose up -d --build
    ```
-
-    *Note: You can change the port by adding `PORT=YOUR_PORT` to your `.env` file. Default is 3429.*
 
 4. **Access the interface:**
     Open your browser at `http://localhost:3429` (or the port you configured).
@@ -47,7 +48,7 @@ The application offers presets for common providers:
 ## 3D Import
 To import a 3D model with separate textures:
 1. Create a ZIP file containing:
-   - Your `.glb` file.
-   - Your textures (in the same folder or subfolders, as long as relative links in the GLB are correct).
+   - Your `.glb/.gltf/.fbx` file.
+   - Your textures (in the same folder or subfolders, as long as relative links in the 3D model are correct).
 2. Select the "3D Asset" option when creating a project or uploading a version.
 3. Upload the ZIP file.
