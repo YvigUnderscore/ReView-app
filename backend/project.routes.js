@@ -466,7 +466,7 @@ router.get('/slug/:teamSlug/:projectSlug', authenticateToken, async (req, res) =
 });
 
 // Reuseable fetch function
-async function fetchFullProject(projectId, userId, teamId) {
+async function fetchFullProject(projectId, userId, teamId, isClient = false) {
     const project = await prisma.project.findUnique({
         where: { id: projectId },
         include: {
@@ -604,10 +604,45 @@ async function fetchFullProject(projectId, userId, teamId) {
                 user.teamRoles = user.teamRoles.filter(role => role.teamId === teamId);
             }
         };
-        // Apply filter
+
+        // NEW: Client/Guest Comment Filtering
+        const filterComments = (comments) => {
+            return comments.filter(c => c.isVisibleToClient || c.guestName).map(c => {
+                if (c.replies) {
+                    c.replies = filterComments(c.replies);
+                }
+                return c;
+            });
+        };
+
+        // Apply team role filter to all users in comments
         if (project.videos) project.videos.forEach(v => v.comments?.forEach(c => { filterRoles(c.user); c.replies?.forEach(r => filterRoles(r.user)); }));
         if (project.imageBundles) project.imageBundles.forEach(ib => ib.images?.forEach(img => img.comments?.forEach(c => { filterRoles(c.user); c.replies?.forEach(r => filterRoles(r.user)); })));
         if (project.threeDAssets) project.threeDAssets.forEach(a => a.comments?.forEach(c => { filterRoles(c.user); c.replies?.forEach(r => filterRoles(r.user)); }));
+
+        // Apply Client Filtering if isClient is true
+        if (isClient) {
+            if (project.videos) {
+                project.videos.forEach(video => {
+                    if (video.comments) video.comments = filterComments(video.comments);
+                });
+            }
+            if (project.imageBundles) {
+                project.imageBundles.forEach(bundle => {
+                    if (bundle.images) {
+                        bundle.images.forEach(image => {
+                            if (image.comments) image.comments = filterComments(image.comments);
+                        });
+                    }
+                });
+            }
+            if (project.threeDAssets) {
+                project.threeDAssets.forEach(asset => {
+                    if (asset.comments) asset.comments = filterComments(asset.comments);
+                });
+            }
+        }
+
         if (project.team?.members) {
             project.team.members = project.team.members.map(m => {
                 if (m.user) {
@@ -657,7 +692,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
             return res.status(403).json({ error: 'Access denied' });
         }
 
-        const project = await fetchFullProject(projectId, req.user.id, basicProject.teamId);
+        const project = await fetchFullProject(projectId, req.user.id, basicProject.teamId, req.user.role === 'CLIENT');
 
         if (!project) return res.status(404).json({ error: 'Project not found' });
 
@@ -798,37 +833,71 @@ router.post('/', authenticateToken, projectRateLimiter, upload.fields([{ name: '
                 return res.status(400).json({ error: 'Invalid ZIP file format' });
             }
         } else {
-            if (!isValidThreeDFile(videoFile.path)) {
+            const ext3d = isValidThreeDFile(videoFile.path);
+            if (!ext3d) {
                 try { fs.unlinkSync(videoFile.path); } catch (e) { }
                 if (thumbnailFile) try { fs.unlinkSync(thumbnailFile.path); } catch (e) { }
                 return res.status(400).json({ error: 'Invalid 3D file format' });
             }
+            // Enforce extension
+            const newPath = videoFile.path.replace(path.extname(videoFile.path), ext3d);
+            if (newPath !== videoFile.path) {
+                fs.renameSync(videoFile.path, newPath);
+                videoFile.path = newPath;
+                videoFile.filename = path.basename(newPath);
+            }
         }
     } else if (videoFile) {
         // Validate Video
-        if (!isValidVideoFile(videoFile.path)) {
+        const vidExt = isValidVideoFile(videoFile.path);
+        if (!vidExt) {
             try { fs.unlinkSync(videoFile.path); } catch (e) { }
             if (thumbnailFile) try { fs.unlinkSync(thumbnailFile.path); } catch (e) { }
             return res.status(400).json({ error: 'Invalid video file format' });
+        }
+        // Enforce extension
+        const newPath = videoFile.path.replace(path.extname(videoFile.path), vidExt);
+        if (newPath !== videoFile.path) {
+            fs.renameSync(videoFile.path, newPath);
+            videoFile.path = newPath;
+            videoFile.filename = path.basename(newPath);
         }
     }
 
     // Validate Images
     for (const img of imageFiles) {
-        if (!isValidImageFile(img.path)) {
+        const imgExt = isValidImageFile(img.path);
+        if (!imgExt) {
             // Cleanup all uploaded files
             if (videoFile) try { fs.unlinkSync(videoFile.path); } catch (e) { }
             imageFiles.forEach(f => { try { fs.unlinkSync(f.path); } catch (e) { } });
             if (thumbnailFile) try { fs.unlinkSync(thumbnailFile.path); } catch (e) { }
             return res.status(400).json({ error: `Invalid image file format: ${img.originalname}` });
         }
+        // Enforce extension
+        const newPath = img.path.replace(path.extname(img.path), imgExt);
+        if (newPath !== img.path) {
+            fs.renameSync(img.path, newPath);
+            img.path = newPath;
+            img.filename = path.basename(newPath);
+        }
     }
 
-    if (thumbnailFile && !isValidImageFile(thumbnailFile.path)) {
-        if (videoFile) try { fs.unlinkSync(videoFile.path); } catch (e) { }
-        imageFiles.forEach(f => { try { fs.unlinkSync(f.path); } catch (e) { } });
-        try { fs.unlinkSync(thumbnailFile.path); } catch (e) { }
-        return res.status(400).json({ error: 'Invalid thumbnail file format' });
+    if (thumbnailFile) {
+        const thumbExt = isValidImageFile(thumbnailFile.path);
+        if (!thumbExt) {
+            if (videoFile) try { fs.unlinkSync(videoFile.path); } catch (e) { }
+            imageFiles.forEach(f => { try { fs.unlinkSync(f.path); } catch (e) { } });
+            try { fs.unlinkSync(thumbnailFile.path); } catch (e) { }
+            return res.status(400).json({ error: 'Invalid thumbnail file format' });
+        }
+        // Enforce extension
+        const newPath = thumbnailFile.path.replace(path.extname(thumbnailFile.path), thumbExt);
+        if (newPath !== thumbnailFile.path) {
+            fs.renameSync(thumbnailFile.path, newPath);
+            thumbnailFile.path = newPath;
+            thumbnailFile.filename = path.basename(newPath);
+        }
     }
 
     const { name, description, teamId } = req.body;
@@ -972,8 +1041,8 @@ router.post('/', authenticateToken, projectRateLimiter, upload.fields([{ name: '
         }
 
         let projectData = {
-            name: name || 'Untitled Project',
-            description: description || '',
+            name: name ? sanitizeHtml(name) : 'Untitled Project',
+            description: description ? sanitizeHtml(description) : '',
             teamId: parsedTeamId,
             thumbnailPath,
             hasCustomThumbnail,
@@ -1571,27 +1640,51 @@ router.post('/:id/versions', authenticateToken, versionRateLimiter, upload.field
     if (isThreeD) {
         if (isZip) {
             if (!isValidZipFile(videoFile.path)) {
-                try { fs.unlinkSync(videoFile.path); } catch (e) { }
+                try { await fs.promises.unlink(videoFile.path); } catch (e) { }
                 return res.status(400).json({ error: 'Invalid ZIP file format' });
             }
         } else {
-            if (!isValidThreeDFile(videoFile.path)) {
-                try { fs.unlinkSync(videoFile.path); } catch (e) { }
+            const ext3d = isValidThreeDFile(videoFile.path);
+            if (!ext3d) {
+                try { await fs.promises.unlink(videoFile.path); } catch (e) { }
                 return res.status(400).json({ error: 'Invalid 3D file format' });
+            }
+            // Enforce extension
+            const newPath = videoFile.path.replace(path.extname(videoFile.path), ext3d);
+            if (newPath !== videoFile.path) {
+                await fs.promises.rename(videoFile.path, newPath);
+                videoFile.path = newPath;
+                videoFile.filename = path.basename(newPath);
             }
         }
     } else if (videoFile) {
-        if (!isValidVideoFile(videoFile.path)) {
-            try { fs.unlinkSync(videoFile.path); } catch (e) { }
+        const vidExt = isValidVideoFile(videoFile.path);
+        if (!vidExt) {
+            try { await fs.promises.unlink(videoFile.path); } catch (e) { }
             return res.status(400).json({ error: 'Invalid video file format' });
+        }
+        // Enforce extension
+        const newPath = videoFile.path.replace(path.extname(videoFile.path), vidExt);
+        if (newPath !== videoFile.path) {
+            await fs.promises.rename(videoFile.path, newPath);
+            videoFile.path = newPath;
+            videoFile.filename = path.basename(newPath);
         }
     }
 
     for (const img of imageFiles) {
-        if (!isValidImageFile(img.path)) {
-            if (videoFile) try { fs.unlinkSync(videoFile.path); } catch (e) { }
-            imageFiles.forEach(f => { try { fs.unlinkSync(f.path); } catch (e) { } });
+        const imgExt = isValidImageFile(img.path);
+        if (!imgExt) {
+            if (videoFile) try { await fs.promises.unlink(videoFile.path); } catch (e) { }
+            await Promise.all(imageFiles.map(f => fs.promises.unlink(f.path).catch(e => { })));
             return res.status(400).json({ error: 'Invalid image file format' });
+        }
+        // Enforce extension
+        const newPath = img.path.replace(path.extname(img.path), imgExt);
+        if (newPath !== img.path) {
+            await fs.promises.rename(img.path, newPath);
+            img.path = newPath;
+            img.filename = path.basename(newPath);
         }
     }
 
@@ -1637,7 +1730,7 @@ router.post('/:id/versions', authenticateToken, versionRateLimiter, upload.field
                 const thumbName = `thumb-${firstImg.filename}`;
                 const thumbDest = path.join(THUMBNAIL_DIR, thumbName);
                 try {
-                    fs.copyFileSync(firstImg.path, thumbDest);
+                    await fs.promises.copyFile(firstImg.path, thumbDest);
                     await prisma.project.update({
                         where: { id: projectId },
                         data: { thumbnailPath: thumbName }
@@ -1665,7 +1758,7 @@ router.post('/:id/versions', authenticateToken, versionRateLimiter, upload.field
                     try {
                         const zip = new AdmZip(videoFile.path);
                         const extractDir = path.join(UPLOAD_DIR, 'unpacked', path.parse(videoFile.filename).name);
-                        fs.mkdirSync(extractDir, { recursive: true });
+                        await fs.promises.mkdir(extractDir, { recursive: true });
 
                         // Secure Extraction: Only extract allowlisted extensions
                         const zipEntries = zip.getEntries();
@@ -1680,13 +1773,13 @@ router.post('/:id/versions', authenticateToken, versionRateLimiter, upload.field
                             }
                         });
 
-                        const findModel = (dir) => {
-                            const files = fs.readdirSync(dir);
+                        const findModel = async (dir) => {
+                            const files = await fs.promises.readdir(dir);
                             for (const file of files) {
                                 const fullPath = path.join(dir, file);
-                                const stat = fs.statSync(fullPath);
+                                const stat = await fs.promises.stat(fullPath);
                                 if (stat.isDirectory()) {
-                                    const found = findModel(fullPath);
+                                    const found = await findModel(fullPath);
                                     if (found) return found;
                                 } else {
                                     const lower = file.toLowerCase();
@@ -1698,7 +1791,7 @@ router.post('/:id/versions', authenticateToken, versionRateLimiter, upload.field
                             return null;
                         };
 
-                        const modelFullPath = findModel(extractDir);
+                        const modelFullPath = await findModel(extractDir);
                         if (!modelFullPath) {
                             throw new Error('No 3D model (GLB/FBX) found in ZIP');
                         }
@@ -1713,8 +1806,8 @@ router.post('/:id/versions', authenticateToken, versionRateLimiter, upload.field
                             const conversionEnabled = await isFbxConversionEnabled();
                             if (!conversionEnabled) {
                                 console.log('[3D Upload] FBX server conversion is disabled by admin');
-                                try { fs.rmSync(extractDir, { recursive: true, force: true }); } catch (err) { }
-                                try { fs.unlinkSync(videoFile.path); } catch (err) { }
+                                try { await fs.promises.rm(extractDir, { recursive: true, force: true }); } catch (err) { }
+                                try { await fs.promises.unlink(videoFile.path); } catch (err) { }
                                 return res.status(400).json({
                                     error: 'FBX server conversion is disabled. Please convert your FBX to GLB format before uploading.'
                                 });
@@ -1733,8 +1826,8 @@ router.post('/:id/versions', authenticateToken, versionRateLimiter, upload.field
                                 mimeType = 'model/gltf-binary';
                             } else {
                                 console.error('[3D Upload] FBX conversion failed:', result.error);
-                                try { fs.rmSync(extractDir, { recursive: true, force: true }); } catch (err) { }
-                                try { fs.unlinkSync(videoFile.path); } catch (err) { }
+                                try { await fs.promises.rm(extractDir, { recursive: true, force: true }); } catch (err) { }
+                                try { await fs.promises.unlink(videoFile.path); } catch (err) { }
                                 return res.status(400).json({
                                     error: 'ZIP contains FBX file which requires conversion. Server conversion failed: ' + result.error
                                 });
@@ -1744,14 +1837,14 @@ router.post('/:id/versions', authenticateToken, versionRateLimiter, upload.field
                         }
 
                         // Clean up the original ZIP file
-                        try { fs.unlinkSync(videoFile.path); } catch (err) { }
+                        try { await fs.promises.unlink(videoFile.path); } catch (err) { }
 
                     } catch (e) {
                         console.error('Error processing ZIP:', e);
-                        try { fs.unlinkSync(videoFile.path); } catch (err) { }
+                        try { await fs.promises.unlink(videoFile.path); } catch (err) { }
                         // Cleanup extracted directory if it exists
                         const extractDir = path.join(UPLOAD_DIR, 'unpacked', path.parse(videoFile.filename).name);
-                        try { fs.rmSync(extractDir, { recursive: true, force: true }); } catch (err) { }
+                        try { await fs.promises.rm(extractDir, { recursive: true, force: true }); } catch (err) { }
 
                         return res.status(400).json({ error: 'Failed to process ZIP file: ' + e.message });
                     }
@@ -1761,7 +1854,7 @@ router.post('/:id/versions', authenticateToken, versionRateLimiter, upload.field
                 if (ext === '.fbx' && !isZip) {
                     const conversionEnabled = await isFbxConversionEnabled();
                     if (!conversionEnabled) {
-                        try { fs.unlinkSync(videoFile.path); } catch (err) { }
+                        try { await fs.promises.unlink(videoFile.path); } catch (err) { }
                         return res.status(400).json({
                             error: 'FBX server conversion is disabled. Please convert your FBX to GLB format before uploading.'
                         });
@@ -1775,19 +1868,19 @@ router.post('/:id/versions', authenticateToken, versionRateLimiter, upload.field
 
                     if (result.success) {
                         console.log('[3D Upload] FBX converted to GLB successfully');
-                        try { fs.unlinkSync(videoFile.path); } catch (err) { } // clean original
+                        try { await fs.promises.unlink(videoFile.path); } catch (err) { } // clean original
 
                         // Delete .fbm folder created by fbx2gltf
                         const fbmFolder = videoFile.path.replace(/\.fbx$/i, '.fbm');
                         if (fs.existsSync(fbmFolder)) {
-                            try { fs.rmSync(fbmFolder, { recursive: true, force: true }); } catch (err) { }
+                            try { await fs.promises.rm(fbmFolder, { recursive: true, force: true }); } catch (err) { }
                         }
 
                         finalPath = result.outputPath;
                         finalFilename = path.basename(result.outputPath);
                         mimeType = 'model/gltf-binary';
                     } else {
-                        try { fs.unlinkSync(videoFile.path); } catch (err) { }
+                        try { await fs.promises.unlink(videoFile.path); } catch (err) { }
                         return res.status(400).json({
                             error: 'FBX files require conversion. Server conversion failed: ' + result.error
                         });
@@ -1800,7 +1893,7 @@ router.post('/:id/versions', authenticateToken, versionRateLimiter, upload.field
 
                 const sanName = videoFile.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
                 const projectTargetDir = path.join(UPLOAD_DIR, teamSlugToUse, project.slug);
-                if (!fs.existsSync(projectTargetDir)) fs.mkdirSync(projectTargetDir, { recursive: true });
+                await fs.promises.mkdir(projectTargetDir, { recursive: true });
 
                 // Construct filename with version prefix
                 const finalExt = path.extname(finalPath);
@@ -1815,15 +1908,15 @@ router.post('/:id/versions', authenticateToken, versionRateLimiter, upload.field
                 const targetFilename = `${versionName}_${safeName}`;
                 const targetFullPath = path.join(projectTargetDir, targetFilename);
 
-                fs.copyFileSync(finalPath, targetFullPath);
+                await fs.promises.copyFile(finalPath, targetFullPath);
 
                 // Cleanup intermediate file/folder after copy
                 if (isZip) {
                     const extractDir = path.join(UPLOAD_DIR, 'unpacked', path.parse(videoFile.filename).name);
-                    try { fs.rmSync(extractDir, { recursive: true, force: true }); } catch (err) { }
+                    try { await fs.promises.rm(extractDir, { recursive: true, force: true }); } catch (err) { }
                 } else if (ext === '.fbx') {
                     // For standalone FBX, finalPath is the temp GLB in /media
-                    try { fs.unlinkSync(finalPath); } catch (err) { }
+                    try { await fs.promises.unlink(finalPath); } catch (err) { }
                 }
 
                 finalPath = targetFullPath;
@@ -1875,7 +1968,7 @@ router.post('/:id/versions', authenticateToken, versionRateLimiter, upload.field
 
                 // Cleanup temp files if they exist (unpacked zip etc) are already handled above by try-catch blocks in the zip/convert logic
                 // But let's be sure to clean up the original videoFile if it wasn't cleaned
-                try { if (fs.existsSync(videoFile.path)) fs.unlinkSync(videoFile.path); } catch (e) { }
+                try { if (fs.existsSync(videoFile.path)) await fs.promises.unlink(videoFile.path); } catch (e) { }
 
             } else {
                 // VIDEO VERSION PROCESSING
@@ -1884,13 +1977,13 @@ router.post('/:id/versions', authenticateToken, versionRateLimiter, upload.field
 
                 const sanName = videoFile.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
                 const projectTargetDir = path.join(UPLOAD_DIR, teamSlugToUse, project.slug);
-                if (!fs.existsSync(projectTargetDir)) fs.mkdirSync(projectTargetDir, { recursive: true });
+                await fs.promises.mkdir(projectTargetDir, { recursive: true });
 
                 const targetFilename = `${versionName}_${sanName}`;
                 const targetFullPath = path.join(projectTargetDir, targetFilename);
 
-                fs.copyFileSync(videoFile.path, targetFullPath);
-                try { fs.unlinkSync(videoFile.path); } catch (e) { }
+                await fs.promises.copyFile(videoFile.path, targetFullPath);
+                try { await fs.promises.unlink(videoFile.path); } catch (e) { }
 
                 const finalRelPath = path.join(teamSlugToUse, project.slug, targetFilename).replace(/\\/g, '/');
                 const { frameRate, duration } = await getVideoMetadata(targetFullPath);
@@ -2102,7 +2195,7 @@ router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUploa
 
     // Input Validation
     if (!isValidText(content, 5000)) {
-        attachmentFiles.forEach(f => { try { fs.unlinkSync(f.path); } catch (e) { } });
+        await Promise.all(attachmentFiles.map(f => fs.promises.unlink(f.path).catch(e => { })));
         return res.status(400).json({ error: 'Comment content exceeds 5000 characters' });
     }
 
@@ -2110,13 +2203,23 @@ router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUploa
     let attachmentPaths = [];
     for (const attachmentFile of attachmentFiles) {
         if (attachmentFile.size > 5 * 1024 * 1024) {
-            attachmentFiles.forEach(f => { try { fs.unlinkSync(f.path); } catch (e) { } });
+            await Promise.all(attachmentFiles.map(f => fs.promises.unlink(f.path).catch(e => { })));
             return res.status(400).json({ error: 'Each attachment must be under 5MB' });
         }
-        if (!isValidImageFile(attachmentFile.path)) {
-            attachmentFiles.forEach(f => { try { fs.unlinkSync(f.path); } catch (e) { } });
+        const attExt = isValidImageFile(attachmentFile.path);
+        if (!attExt) {
+            await Promise.all(attachmentFiles.map(f => fs.promises.unlink(f.path).catch(e => { })));
             return res.status(400).json({ error: 'Invalid attachment file format' });
         }
+
+        // Enforce extension
+        const newPath = attachmentFile.path.replace(path.extname(attachmentFile.path), attExt);
+        if (newPath !== attachmentFile.path) {
+            await fs.promises.rename(attachmentFile.path, newPath);
+            attachmentFile.path = newPath;
+            attachmentFile.filename = path.basename(newPath);
+        }
+
         attachmentPaths.push(attachmentFile.filename);
     }
 
@@ -2125,7 +2228,7 @@ router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUploa
     // Security: Check if user has access to the project
     const access = await checkProjectAccess(req.user, projectId);
     if (!access.authorized) {
-        attachmentFiles.forEach(f => { try { fs.unlinkSync(f.path); } catch (e) { } });
+        await Promise.all(attachmentFiles.map(f => fs.promises.unlink(f.path).catch(e => { })));
         return res.status(access.status).json({ error: access.error });
     }
 
@@ -2149,8 +2252,8 @@ router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUploa
                 const filename = `${prefix}-${crypto.randomUUID()}.jpg`;
                 const commentsDir = path.join(DATA_PATH, 'comments');
                 const filepath = path.join(commentsDir, filename);
-                if (!fs.existsSync(commentsDir)) fs.mkdirSync(commentsDir, { recursive: true });
-                fs.writeFileSync(filepath, buffer);
+                await fs.promises.mkdir(commentsDir, { recursive: true });
+                await fs.promises.writeFile(filepath, buffer);
                 return { filename, size };
             }
             return null;
@@ -2164,7 +2267,7 @@ router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUploa
                     screenshotSize += result.size;
                 }
             } catch (e) {
-                attachmentFiles.forEach(f => { try { fs.unlinkSync(f.path); } catch (err) { } });
+                await Promise.all(attachmentFiles.map(f => fs.promises.unlink(f.path).catch(e => { })));
                 return res.status(400).json({ error: e.message });
             }
         }
@@ -2191,10 +2294,10 @@ router.post('/:id/comments', authenticateToken, commentRateLimiter, commentUploa
                     fileSize: totalSize
                 });
             } catch (e) {
-                attachmentFiles.forEach(f => { try { fs.unlinkSync(f.path); } catch (err) { } });
+                await Promise.all(attachmentFiles.map(f => fs.promises.unlink(f.path).catch(e => { })));
                 // Clean up screenshots if quota exceeded
-                if (screenshotPath) try { fs.unlinkSync(path.join(DATA_PATH, 'comments', screenshotPath)); } catch (err) { }
-                if (annotationScreenshotPath) try { fs.unlinkSync(path.join(DATA_PATH, 'comments', annotationScreenshotPath)); } catch (err) { }
+                if (screenshotPath) try { await fs.promises.unlink(path.join(DATA_PATH, 'comments', screenshotPath)); } catch (err) { }
+                if (annotationScreenshotPath) try { await fs.promises.unlink(path.join(DATA_PATH, 'comments', annotationScreenshotPath)); } catch (err) { }
                 return res.status(403).json({ error: e.message });
             }
         }
@@ -2479,7 +2582,7 @@ router.patch('/comments/:commentId', authenticateToken, async (req, res) => {
         if (isVisibleToClient !== undefined) data.isVisibleToClient = isVisibleToClient;
         if (assigneeId !== undefined) data.assigneeId = assigneeId ? parseInt(assigneeId) : null;
         if (content !== undefined) {
-            data.content = content;
+            data.content = sanitizeHtml(content);
             data.isEdited = true;
         }
         if (annotation !== undefined) {
@@ -2567,7 +2670,7 @@ router.post('/comments/:commentId/reactions', authenticateToken, commentRateLimi
                     commentId,
                     emoji,
                     userId: req.user.id,
-                    guestName
+                    guestName: guestName ? sanitizeHtml(guestName) : null
                 }
             });
         }
@@ -2635,6 +2738,11 @@ router.get('/:id/images/:imageId/export/:format', authenticateToken, async (req,
 
         if (!imageBundle) return res.status(404).send('Bundle not found');
 
+        // Security: Ensure bundle belongs to the authorized project
+        if (imageBundle.projectId !== parseInt(id)) {
+            return res.status(403).send('Access denied');
+        }
+
         const dateFormatSetting = await prisma.systemSetting.findUnique({ where: { key: 'date_format' } });
         const dateFormat = dateFormatSetting ? dateFormatSetting.value : 'DD/MM/YYYY';
         const siteTitleSetting = await prisma.systemSetting.findUnique({ where: { key: 'site_title' } });
@@ -2671,6 +2779,11 @@ router.get('/:id/3d/:threeDAssetId/export/:format', authenticateToken, async (re
         const asset = await prisma.threeDAsset.findUnique({ where: { id: parseInt(threeDAssetId) } });
 
         if (!asset) return res.status(404).send('Not found');
+
+        // Security: Ensure asset belongs to the authorized project
+        if (asset.projectId !== parseInt(id)) {
+            return res.status(403).send('Access denied');
+        }
 
         const comments = await prisma.comment.findMany({
             where: { threeDAssetId: parseInt(threeDAssetId) },
@@ -2714,6 +2827,11 @@ router.get('/:id/videos/:videoId/export/:format', authenticateToken, async (req,
         const video = await prisma.video.findUnique({ where: { id: parseInt(videoId) } });
 
         if (!video) return res.status(404).send('Not found');
+
+        // Security: Ensure video belongs to the authorized project
+        if (video.projectId !== parseInt(id)) {
+            return res.status(403).send('Access denied');
+        }
 
         // Fetch Metadata
         const metadata = await getVideoMetadata(video.path);
@@ -2799,8 +2917,8 @@ router.patch('/:id', authenticateToken, upload.single('thumbnail'), async (req, 
         }
 
         const data = {};
-        if (name !== undefined) data.name = name;
-        if (description !== undefined) data.description = description;
+        if (name !== undefined) data.name = sanitizeHtml(name);
+        if (description !== undefined) data.description = sanitizeHtml(description);
 
         let statusChanged = false;
         if (status !== undefined) {

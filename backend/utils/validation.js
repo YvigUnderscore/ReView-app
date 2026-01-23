@@ -15,19 +15,27 @@ const isValidVideoFile = (filepath) => {
 
         // Check for WEBM: 1A 45 DF A3
         if (buffer[0] === 0x1A && buffer[1] === 0x45 && buffer[2] === 0xDF && buffer[3] === 0xA3) {
-            return true;
+            return '.webm';
         }
 
-        // Check for MP4/MOV: 'ftyp' at offset 4
-        // 'ftyp' in hex is 66 74 79 70
-        if (buffer[4] === 0x66 && buffer[5] === 0x74 && buffer[6] === 0x79 && buffer[7] === 0x70) {
-            return true;
-        }
+            // Check for MP4/MOV: 'ftyp' at offset 4
+            // 'ftyp' in hex is 66 74 79 70
+            if (buffer[4] === 0x66 && buffer[5] === 0x74 && buffer[6] === 0x79 && buffer[7] === 0x70) {
+                
+                // Vérification de la "Major Brand" aux offsets 8-11
+                // 'qt  ' (hex: 71 74 20 20) indique QuickTime (.mov)
+                if (buffer[8] === 0x71 && buffer[9] === 0x74 && buffer[10] === 0x20 && buffer[11] === 0x20) {
+                    return '.mov';
+                }
 
-        return false;
+                // Sinon, on assume que c'est un MP4 standard (isom, mp41, mp42, etc.)
+                return '.mp4'; 
+            }
+
+        return null;
     } catch (err) {
         console.error('Error validating video file:', err);
-        return false;
+        return null;
     }
 };
 
@@ -46,13 +54,13 @@ const isValidImageFile = (filepath) => {
 
         // JPG: FF D8 FF
         if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
-            return true;
+            return '.jpg';
         }
 
         // PNG: 89 50 4E 47 0D 0A 1A 0A
         if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47 &&
             buffer[4] === 0x0D && buffer[5] === 0x0A && buffer[6] === 0x1A && buffer[7] === 0x0A) {
-            return true;
+            return '.png';
         }
 
         // WEBP: RIFF at 0, WEBP at 8
@@ -60,13 +68,13 @@ const isValidImageFile = (filepath) => {
         // WEBP: 57 45 42 50
         if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
             buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50) {
-            return true;
+            return '.webp';
         }
 
-        return false;
+        return null;
     } catch (err) {
         console.error('Error validating image file:', err);
-        return false;
+        return null;
     }
 };
 
@@ -86,34 +94,34 @@ const isValidThreeDFile = (filepath) => {
         // GLB: glTF (67 6C 74 46) -> Should be 67 6C 54 46
         // 'g' (67) 'l' (6C) 'T' (54) 'F' (46)
         if (buffer[0] === 0x67 && buffer[1] === 0x6C && buffer[2] === 0x54 && buffer[3] === 0x46) {
-            return true;
+            return '.glb';
         }
 
         // FBX: "Kaydara FBX Binary  \x00"
         // 4B 61 79 64 61 72 61 20 46 42 58 20 42 69 6E 61 72 79 20 20 00
         if (buffer.toString('utf8', 0, 18) === 'Kaydara FBX Binary') {
-            return true;
+            return '.fbx';
         }
 
         // USDZ (Zip): PK (50 4B 03 04)
         if (buffer[0] === 0x50 && buffer[1] === 0x4B && buffer[2] === 0x03 && buffer[3] === 0x04) {
-             return true;
+            return '.usdz';
         }
 
         // USDC (Binary Crate): PXR-USDC (50 58 52 2D 55 53 44 43)
         if (buffer.toString('utf8', 0, 8) === 'PXR-USDC') {
-            return true;
+            return '.usdc';
         }
 
         // USDA (ASCII): #usda (23 75 73 64 61)
         if (buffer.toString('utf8', 0, 5) === '#usda') {
-            return true;
+            return '.usda';
         }
 
-        return false;
+        return null;
     } catch (err) {
         console.error('Error validating 3D file:', err);
-        return false;
+        return null;
     }
 };
 

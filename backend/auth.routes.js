@@ -305,6 +305,18 @@ router.put('/me', authenticateToken, upload.single('avatar'), async (req, res) =
       if (!isValidEmail(email)) {
         return res.status(400).json({ error: 'Invalid email format' });
       }
+
+      // SECURITY FIX: Require password to change email
+      if (email !== user.email) {
+        if (!currentPassword) {
+          return res.status(400).json({ error: 'Current password is required to change email address' });
+        }
+        const validPassword = await bcrypt.compare(currentPassword, user.password);
+        if (!validPassword) {
+          return res.status(401).json({ error: 'Invalid current password' });
+        }
+      }
+
       data.email = email;
     }
 

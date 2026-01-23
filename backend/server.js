@@ -56,7 +56,21 @@ setInterval(runCleanup, 60 * 60 * 1000);
 // Middleware
 app.set('trust proxy', 1); // Trust first proxy (Nginx) for Rate Limiting
 app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" }
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"], // unsafe-inline needed for some hydration/runtime scripts if nonce not fully implemented
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      mediaSrc: ["'self'", "data:", "blob:"],
+      connectSrc: ["'self'", "ws:", "wss:"], // WebSockets
+      frameSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      upgradeInsecureRequests: [],
+    },
+  },
 }));
 app.use(cors());
 
@@ -70,10 +84,15 @@ app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 
 // Static files (uploaded media)
-app.use('/api/media', express.static(path.join(DATA_PATH, 'media')));
-app.use('/api/thumbnails', express.static(path.join(DATA_PATH, 'thumbnails')));
+// Static files (uploaded media)
+// Public assets
 app.use('/api/media/avatars', express.static(path.join(DATA_PATH, 'avatars')));
 app.use('/api/media/system', express.static(path.join(DATA_PATH, 'system')));
+app.use('/api/thumbnails', express.static(path.join(DATA_PATH, 'thumbnails')));
+
+// Secure Media Serving (everything else in /api/media)
+const mediaRoutes = require('./media.routes');
+app.use('/api/media', mediaRoutes);
 
 // Global API Rate Limit: 5000 requests per 15 minutes
 const apiLimiter = rateLimit({
@@ -103,6 +122,10 @@ app.use('/api/system', settingsRoutes); // For public config
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
+
+// Global Error Handler (Must be last middleware)
+const errorHandler = require('./middleware/error.middleware');
+app.use(errorHandler);
 
 if (require.main === module) {
   console.log(`[DEBUG] Attempting to listen on port ${PORT}...`);

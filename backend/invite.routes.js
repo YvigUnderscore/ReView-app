@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const { PrismaClient } = require('@prisma/client');
 const { authenticateToken, requireAdmin } = require('./middleware');
 const { rateLimit } = require('./utils/rateLimiter');
+const { isValidEmail } = require('./utils/validation');
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -18,6 +19,10 @@ const inviteLimiter = rateLimit({
 // Authenticated users can invite if they are Admin OR own a Team.
 router.post('/', authenticateToken, inviteLimiter, async (req, res) => {
   const { email, role } = req.body;
+
+  if (!email || !isValidEmail(email)) {
+    return res.status(400).json({ error: 'Invalid email format' });
+  }
 
   try {
     // Permission Check
@@ -64,8 +69,15 @@ const validateLimiter = rateLimit({
   message: { error: 'Too many validation attempts.' }
 });
 
+// Rate limit: 5 bulk invite requests per hour (prevent mass spam)
+const bulkInviteLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: { error: 'Too many bulk invite attempts, please try again later.' }
+});
+
 // POST /invites/bulk: Create multiple invites from a list of emails (Admin only)
-router.post('/bulk', authenticateToken, async (req, res) => {
+router.post('/bulk', authenticateToken, bulkInviteLimiter, async (req, res) => {
   // Admin only for bulk invites
   if (req.user.role !== 'admin') {
     return res.status(403).json({ error: 'Only admins can generate bulk invites.' });
@@ -89,6 +101,12 @@ router.post('/bulk', authenticateToken, async (req, res) => {
     for (const email of emails) {
       const trimmedEmail = email.trim();
       if (!trimmedEmail) continue;
+
+      if (!isValidEmail(trimmedEmail)) {
+        // Skip invalid emails to prevent XSS and garbage data
+        console.warn(`[Bulk Invite] Skipped invalid email: ${trimmedEmail}`);
+        continue;
+      }
 
       const token = crypto.randomBytes(32).toString('hex');
 

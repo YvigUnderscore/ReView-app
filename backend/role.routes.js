@@ -1,6 +1,7 @@
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
 const { authenticateToken } = require('./middleware');
+const { sanitizeHtml } = require('./utils/security');
 
 const router = express.Router({ mergeParams: true }); // mergeParams to access :teamId
 const prisma = new PrismaClient();
@@ -58,8 +59,8 @@ router.post('/', authenticateToken, async (req, res) => {
 
         const role = await prisma.teamRole.create({
             data: {
-                name,
-                color: color || '#3b82f6',
+                name: sanitizeHtml(name),
+                color: color ? sanitizeHtml(color) : '#3b82f6',
                 teamId
             }
         });

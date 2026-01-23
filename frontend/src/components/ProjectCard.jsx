@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { MoreVertical, Pencil, Trash2, Clock, Box, Play } from 'lucide-react';
 import { formatDate } from '../lib/dateUtils';
 import { useBranding } from '../context/BrandingContext';
+import { useAuth } from '../context/AuthContext';
 
 const ProjectCard = ({
     project,
@@ -12,12 +13,16 @@ const ProjectCard = ({
     onDelete
 }) => {
     const { dateFormat } = useBranding();
+    const { getMediaUrl } = useAuth();
     const [isMenuOpen, setIsMenuOpen] = useState(false);
-    const thumbUrl = project.thumbnailPath ?
-        (project.thumbnailPath.includes('/') || project.thumbnailPath.includes('\\') ?
+
+    let thumbUrl = null;
+    if (project.thumbnailPath) {
+        const rawPath = project.thumbnailPath.includes('/') || project.thumbnailPath.includes('\\') ?
             `/api/media/${project.thumbnailPath}` :
-            `/api/thumbnails/${project.thumbnailPath}`
-        ) : null;
+            `/api/thumbnails/${project.thumbnailPath}`;
+        thumbUrl = getMediaUrl(rawPath);
+    }
 
     // Check for unread activity
     const lastVisited = localStorage.getItem(`last_visited_${project.id}`);

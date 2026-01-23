@@ -6,6 +6,7 @@ import { formatDate } from '../lib/dateUtils';
 import { useBranding } from '../context/BrandingContext';
 import { toast } from 'sonner';
 import ConfirmDialog from './ConfirmDialog';
+import { useAuth } from '../context/AuthContext';
 
 const renderContent = (content) => {
     if (!content) return null;
@@ -24,6 +25,7 @@ const CommentItem = ({ comment, onCommentClick, onToggleResolved, onToggleVisibi
     const [showReactionPicker, setShowReactionPicker] = useState(false);
     const [showImageModal, setShowImageModal] = useState(false);
     const { dateFormat } = useBranding();
+    const { getMediaUrl } = useAuth();
 
     useEffect(() => {
         if (highlightedCommentId === comment.id && itemRef.current) {
@@ -241,7 +243,7 @@ const CommentItem = ({ comment, onCommentClick, onToggleResolved, onToggleVisibi
                                                 }}
                                             >
                                                 <img
-                                                    src={`/api/media/${path}`}
+                                                    src={getMediaUrl(`/api/media/${path}`)}
                                                     alt={`Attachment ${idx + 1}`}
                                                     className="max-h-48 w-auto rounded border border-border object-cover"
                                                 />
@@ -263,7 +265,7 @@ const CommentItem = ({ comment, onCommentClick, onToggleResolved, onToggleVisibi
                             }}
                         >
                             <img
-                                src={`/api/media/${showImageModal}`}
+                                src={getMediaUrl(`/api/media/${showImageModal}`)}
                                 alt="Full Attachment"
                                 className="max-w-full max-h-full rounded shadow-lg"
                             />

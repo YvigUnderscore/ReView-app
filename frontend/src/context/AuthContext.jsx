@@ -40,17 +40,17 @@ export const AuthProvider = ({ children }) => {
           const userData = await meRes.json();
           setUser(userData);
           if (userData.teams && userData.teams.length > 0) {
-              const storedTeamId = localStorage.getItem('activeTeamId');
-              if (storedTeamId) {
-                  const storedTeam = userData.teams.find(t => t.id === parseInt(storedTeamId));
-                  if (storedTeam) {
-                      setActiveTeam(storedTeam);
-                  } else {
-                      setActiveTeam(userData.teams[0]);
-                  }
+            const storedTeamId = localStorage.getItem('activeTeamId');
+            if (storedTeamId) {
+              const storedTeam = userData.teams.find(t => t.id === parseInt(storedTeamId));
+              if (storedTeam) {
+                setActiveTeam(storedTeam);
               } else {
-                  setActiveTeam(userData.teams[0]);
+                setActiveTeam(userData.teams[0]);
               }
+            } else {
+              setActiveTeam(userData.teams[0]);
+            }
           }
         } else {
           logout();
@@ -71,8 +71,8 @@ export const AuthProvider = ({ children }) => {
     setUser(userData);
     setSetupRequired(false);
     if (userData.teams && userData.teams.length > 0) {
-         setActiveTeam(userData.teams[0]);
-         localStorage.setItem('activeTeamId', userData.teams[0].id);
+      setActiveTeam(userData.teams[0]);
+      localStorage.setItem('activeTeamId', userData.teams[0].id);
     }
   };
 
@@ -84,16 +84,26 @@ export const AuthProvider = ({ children }) => {
   };
 
   const switchTeam = (teamId) => {
-      if (!user || !user.teams) return;
-      const team = user.teams.find(t => t.id === parseInt(teamId));
-      if (team) {
-          setActiveTeam(team);
-          localStorage.setItem('activeTeamId', team.id);
-      }
+    if (!user || !user.teams) return;
+    const team = user.teams.find(t => t.id === parseInt(teamId));
+    if (team) {
+      setActiveTeam(team);
+      localStorage.setItem('activeTeamId', team.id);
+    }
+  };
+
+  const getMediaUrl = (path) => {
+    if (!path) return '';
+    if (path.startsWith('http')) return path; // Already absolute/external
+
+    const token = localStorage.getItem('token');
+    // If path already has query params, append with &
+    const separator = path.includes('?') ? '&' : '?';
+    return `${path}${token ? `${separator}token=${token}` : ''}`;
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, setupRequired, securityIssue, error, login, logout, checkStatus, setUser, activeTeam, switchTeam }}>
+    <AuthContext.Provider value={{ user, loading, setupRequired, securityIssue, error, login, logout, checkStatus, setUser, activeTeam, switchTeam, getMediaUrl }}>
       {children}
     </AuthContext.Provider>
   );

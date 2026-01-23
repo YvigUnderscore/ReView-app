@@ -11,33 +11,16 @@ import DrawingToolbar from '../DrawingToolbar';
 import Timeline from '../Timeline';
 import ShortcutsModal from '../ShortcutsModal';
 import JSZip from 'jszip';
+import { useAuth } from '../../context/AuthContext';
 
-// HDR Environment presets
-const HDR_ENVIRONMENTS = [
-    { id: 'neutral', name: 'Neutral', icon: '⚪' },
-    { id: 'legacy', name: 'Legacy', icon: '🔵' },
-    { id: 'studio', name: 'Studio', icon: '💡' },
-    { id: 'outdoor', name: 'Outdoor', icon: '🌤️' },
-    { id: 'night', name: 'Night', icon: '🌙' },
-];
-
-// Camera presets
-const CAMERA_PRESETS = [
-    { id: 'front', name: 'Front', orbit: '0deg 90deg auto' },
-    { id: 'back', name: 'Back', orbit: '180deg 90deg auto' },
-    { id: 'left', name: 'Left', orbit: '-90deg 90deg auto' },
-    { id: 'right', name: 'Right', orbit: '90deg 90deg auto' },
-    { id: 'top', name: 'Top', orbit: '0deg 0deg auto' },
-    { id: 'bottom', name: 'Bottom', orbit: '0deg 180deg auto' },
-    { id: 'iso', name: '3/4 View', orbit: '45deg 55deg auto' },
-];
+// ... (HDR_ENVIRONMENTS and CAMERA_PRESETS remain unchanged)
 
 // 3D Annotation tools
 // ANNOTATION_3D_TOOLS removed as requested
 
 
 const ModelViewer = forwardRef(({
-    src,
+    src: rawSrc,
     onAnnotationSave,
     viewingAnnotation,
     isDrawingModeTrigger,
@@ -59,6 +42,9 @@ const ModelViewer = forwardRef(({
     existingComments = [], // Comments to display as 3D billboards
     onCommentClick // Callback when a billboard is clicked
 }, ref) => {
+    const { getMediaUrl } = useAuth();
+    const src = getMediaUrl(rawSrc);
+
     const modelViewerRef = useRef(null);
     const containerRef = useRef(null);
     const canvasRef = useRef(null);
