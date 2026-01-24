@@ -1,101 +1,68 @@
-import React, { Suspense } from 'react';
+import React from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { AnimatePresence, motion } from 'framer-motion';
-
-// Components & Context
-import Layout from '../components/Layout'; // May need a MobileLayout later
-import PrivateRoute from '../components/PrivateRoute';
+import { AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 
-// Pages - Shared
-import Login from '../pages/Login';
-import Setup from '../pages/Setup';
-import Register from '../pages/Register';
-import ForgotPasswordPage from '../pages/ForgotPasswordPage';
-import ResetPasswordPage from '../pages/ResetPasswordPage';
-import LandingPage from '../pages/LandingPage';
-import AdminDashboard from '../pages/Admin/AdminDashboard';
-import TeamDashboard from '../pages/Team/TeamDashboard';
-import RecentActivity from '../pages/RecentActivity';
-import ProjectLibrary from '../pages/ProjectLibrary';
-import Trash from '../pages/Trash';
-import SettingsPage from '../pages/SettingsPage';
-import GuidePage from '../pages/GuidePage';
-import LatestUpdatePage from '../pages/LatestUpdatePage';
-import TeamSettings from '../pages/Team/TeamSettings';
-import TeamRoles from '../pages/Team/TeamRoles';
-import ClientReview from '../pages/ClientReview';
-import CommentsPopup from '../pages/CommentsPopup';
+// Layouts
+import MobileLayout from './layouts/MobileLayout';
 
-// Mobile Specific Pages
-import ProjectViewMobile from './pages/ProjectViewMobile';
-
-const PageTransition = ({ children }) => {
-    return (
-        <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.3, ease: "easeInOut" }}
-            className="w-full h-full"
-        >
-            {children}
-        </motion.div>
-    );
-};
+// Pages
+import MobileLogin from './pages/MobileLogin';
+import MobileDashboard from './pages/MobileDashboard';
+import MobileProjects from './pages/MobileProjects';
+import MobileActivity from './pages/MobileActivity';
+import MobileProfile from './pages/MobileProfile';
+import MobileEditProfile from './pages/MobileEditProfile';
+import MobilePreferences from './pages/MobilePreferences';
+import MobilePrivacy from './pages/MobilePrivacy';
+import MobileProjectView from './pages/MobileProjectView';
 
 const MobileApp = () => {
-    const { user, setupRequired, loading, error, securityIssue } = useAuth();
+    const { user, loading } = useAuth();
     const location = useLocation();
 
-    if (loading) return <div>Loading...</div>;
-    if (error) return <div>Error: {error}</div>;
+    if (loading) return <div className="h-screen w-full bg-black flex items-center justify-center">Loading...</div>;
 
-    if (setupRequired) {
+    // Public Routes
+    if (!user) {
         return (
             <Routes>
-                <Route path="/setup" element={<Setup />} />
-                <Route path="*" element={<Navigate to="/setup" replace />} />
+                <Route path="/login" element={<MobileLogin />} />
+                <Route path="*" element={<Navigate to="/login" replace />} />
             </Routes>
         );
     }
 
+    // Protected Routes
     return (
-        <AnimatePresence>
+        <AnimatePresence mode="wait">
             <Routes location={location} key={location.pathname}>
-                {/* Public Routes - Shared */}
-                <Route path="/" element={<PageTransition>{user ? <Navigate to="/dashboard" replace /> : <LandingPage />}</PageTransition>} />
-                <Route path="/login" element={<PageTransition>{user ? <Navigate to="/dashboard" replace /> : <Login />}</PageTransition>} />
-                <Route path="/register" element={<PageTransition>{user ? <Navigate to="/dashboard" replace /> : <Register />}</PageTransition>} />
-                <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-                <Route path="/reset-password" element={<ResetPasswordPage />} />
-                <Route path="/review/:token" element={<ClientReview />} />
-                <Route path="/guide" element={<GuidePage />} />
-                <Route path="/latest-update" element={<LatestUpdatePage />} />
+                {/* Routes WITHOUT Bottom Nav (Fullscreen) */}
+                <Route path="/project/:id" element={<MobileProjectView />} />
+                <Route path="/:teamSlug/:projectSlug/:versionName?" element={<MobileProjectView />} />
 
-                {/* Protected Routes */}
-                <Route element={<PrivateRoute />}>
-                    {/* Using shared Layout for now, user might want specialized MobileLayout */}
-                    <Route element={<Layout />}>
-                        <Route path="/dashboard" element={<RecentActivity />} />
-                        <Route path="/projects" element={<ProjectLibrary />} />
+                {/* Routes WITH Bottom Nav */}
+                <Route element={<MobileLayout />}>
+                    <Route path="/dashboard" element={<MobileDashboard />} />
+                    <Route path="/projects" element={<MobileProjects />} />
+                    <Route path="/activity" element={<MobileActivity />} />
+                    <Route path="/settings" element={<MobileProfile />} />
 
-                        {/* Project View (Mobile) */}
-                        <Route path="/project/:id" element={<ProjectViewMobile />} />
-                        <Route path="/:teamSlug/:projectSlug/:versionName?" element={<ProjectViewMobile />} />
+                    {/* Settings Sub-pages (With Layout? Or Fullscreen? Generally settings are deeper, so maybe hide nav or keep it) 
+                        User requested "same tints as desktop", desktop usually has modals or separate area. 
+                        Mobile pattern usually full screen for these. 
+                        Let's keep them INSIDE layout but maybe hideNav based on route if we want to mimic "modal" feel 
+                        OR just let them render in the outlet.
+                    */}
+                    <Route path="/settings/edit" element={<MobileEditProfile />} />
+                    <Route path="/settings/preferences" element={<MobilePreferences />} />
+                    <Route path="/settings/privacy" element={<MobilePrivacy />} />
 
-                        <Route path="/project/:id/comments-popup" element={<CommentsPopup />} />
-                        <Route path="/admin" element={<AdminDashboard />} />
-                        <Route path="/team" element={<TeamDashboard />} />
-                        <Route path="/team/roles" element={<TeamRoles />} />
-                        <Route path="/team/settings" element={<TeamSettings />} />
-                        <Route path="/:teamSlug" element={<TeamDashboard />} />
-                        <Route path="/trash" element={<Trash />} />
-                        <Route path="/settings" element={<SettingsPage />} />
-                    </Route>
+                    {/* Redirect root to dashboard */}
+                    <Route path="/" element={<Navigate to="/dashboard" replace />} />
                 </Route>
 
-                <Route path="*" element={<Navigate to="/" replace />} />
+                <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
         </AnimatePresence>
     );

@@ -13,6 +13,7 @@
     "@google/model-viewer": "^4.0.0",
     "axios": "^1.13.2",
     "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
     "framer-motion": "^12.24.10",
     "jszip": "^3.10.1",
     "lucide-react": "^0.561.0",
